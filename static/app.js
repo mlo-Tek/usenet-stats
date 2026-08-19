@@ -1,215 +1,49 @@
-let DATA = null;
-let TAB = "movies";
+let DATA=null,TAB="movies",METRIC="count",CUSTOM_RANGE=null,CURRENT=[];
+const el=id=>document.getElementById(id);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const bytes=n=>{if(!n)return"0 B";const u=["B","KB","MB","GB","TB"];let i=0,v=Number(n);while(v>=1024&&i<u.length-1){v/=1024;i++}return`${v.toFixed(i<2?0:1)} ${u[i]}`};
+const fmtDate=d=>d?new Intl.DateTimeFormat("de-DE",{dateStyle:"medium",timeStyle:"short"}).format(new Date(d)):"–";
+const dayKey=d=>{d=new Date(d);return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`};
 
-const el = id => document.getElementById(id);
-
-const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({
-  "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
-}[c]));
-
-const bytes = n => {
-  if (!n) return "0 B";
-  const u=["B","KB","MB","GB","TB"];
-  let i=0,v=Number(n);
-  while(v>=1024 && i<u.length-1){v/=1024;i++}
-  return `${v.toFixed(i<2?0:1)} ${u[i]}`;
-};
-
-const fmtDate = d => d ? new Intl.DateTimeFormat("de-DE",{
-  dateStyle:"medium",
-  timeStyle:"short"
-}).format(new Date(d)) : "–";
-
-function currentDays(){ return Number(el("days").value); }
-function cutoffTimestamp(days){ return Date.now() - days * 86400000; }
-
-function periodData(){
-  if(!DATA) return {movies:[], episodes:[]};
-  const cutoff = cutoffTimestamp(currentDays());
-  return {
-    movies: DATA.movies.filter(x => new Date(x.date).getTime() >= cutoff),
-    episodes: DATA.episodes.filter(x => new Date(x.date).getTime() >= cutoff)
-  };
+function bounds(){
+  if(CUSTOM_RANGE)return CUSTOM_RANGE;
+  const days=Number(el("days").value),to=new Date(),from=new Date(Date.now()-days*86400000);
+  return{from,to};
 }
+function inRange(x){const b=bounds(),t=new Date(x.date).getTime();return t>=b.from.getTime()&&t<=b.to.getTime()}
+function periodData(){if(!DATA)return{movies:[],episodes:[],failed:[]};return{movies:DATA.movies.filter(inRange),episodes:DATA.episodes.filter(inRange),failed:(DATA.failed||[]).filter(inRange)}}
+function countBy(items,key){const m={};items.forEach(x=>{const v=x[key]||"Unbekannt";m[v]=(m[v]||0)+1});return m}
+function topValue(items,key){const entries=Object.entries(countBy(items,key)).sort((a,b)=>b[1]-a[1]);return entries[0]?`${entries[0][0]} · ${entries[0][1]}`:"–"}
 
-async function load(force=false){
-  el("error").hidden=true;
-  el("refresh").disabled=true;
-  try{
-    const r=await fetch(`/api/stats${force?"?refresh=1":""}`);
-    const j=await r.json();
-    if(!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
-    DATA=j;
-    renderAll();
-  }catch(e){
-    el("error").textContent="Fehler: "+e.message;
-    el("error").hidden=false;
-  }finally{
-    el("refresh").disabled=false;
-  }
-}
+async function load(force=false){el("error").hidden=true;el("refresh").disabled=true;try{const r=await fetch(`/api/stats${force?"?refresh=1":""}`),j=await r.json();if(!r.ok)throw new Error(j.error||`HTTP ${r.status}`);DATA=j;populateFilters();renderAll()}catch(e){el("error").textContent="Fehler: "+e.message;el("error").hidden=false}finally{el("refresh").disabled=false}}
 
-function renderAll(){
-  renderSummary();
-  renderChart();
-  renderList();
-}
+function populateSelect(id,values,label){const s=el(id),old=s.value;const vals=[...new Set(values.filter(Boolean))].sort((a,b)=>a.localeCompare(b,"de"));s.innerHTML=`<option value="">${label}</option>`+vals.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join("");if(vals.includes(old))s.value=old}
+function populateFilters(){const all=[...DATA.movies,...DATA.episodes];populateSelect("indexer",all.map(x=>x.indexer),"Alle Indexer");populateSelect("quality",all.map(x=>x.quality),"Alle Qualitäten");populateSelect("group",all.map(x=>x.releaseGroup),"Alle Groups");populateSelect("client",all.map(x=>x.downloadClient),"Alle Clients");populateSelect("library",all.map(x=>x.library),"Alle Libraries")}
 
-function renderSummary(){
-  const p=periodData();
-  const movieBytes=p.movies.reduce((s,x)=>s+(x.size||0),0);
-  const episodeBytes=p.episodes.reduce((s,x)=>s+(x.size||0),0);
-  const seriesCount=new Set(p.episodes.map(x=>x.title)).size;
+function renderAll(){renderSummary();renderChart();renderList();renderChips()}
+function renderSummary(){const p=periodData(),movieBytes=p.movies.reduce((s,x)=>s+(x.size||0),0),episodeBytes=p.episodes.reduce((s,x)=>s+(x.size||0),0);el("movieCount").textContent=p.movies.length;el("episodeCount").textContent=p.episodes.length;el("seriesCount").textContent=new Set(p.episodes.map(x=>x.title)).size;el("movieSize").textContent=bytes(movieBytes);el("episodeSize").textContent=bytes(episodeBytes);el("totalSize").textContent=bytes(movieBytes+episodeBytes);el("generated").textContent="Stand "+fmtDate(DATA.generatedAt);el("movieTabCount").textContent=`(${p.movies.length})`;el("episodeTabCount").textContent=`(${p.episodes.length})`;el("failedTabCount").textContent=`(${p.failed.length})`;const all=[...p.movies,...p.episodes];el("topIndexer").textContent=topValue(all,"indexer");el("topGroup").textContent=topValue(all,"releaseGroup");el("upgradeCount").textContent=all.filter(x=>x.isUpgrade).length;el("packCount").textContent=p.episodes.filter(x=>x.releaseType==="season_pack").length}
 
-  el("movieCount").textContent=p.movies.length;
-  el("episodeCount").textContent=p.episodes.length;
-  el("seriesCount").textContent=seriesCount;
-  el("movieSize").textContent=bytes(movieBytes);
-  el("episodeSize").textContent=bytes(episodeBytes);
-  el("totalSize").textContent=bytes(movieBytes+episodeBytes);
-  el("generated").textContent="Stand "+fmtDate(DATA.generatedAt);
-  el("movieTabCount").textContent=`(${p.movies.length})`;
-  el("episodeTabCount").textContent=`(${p.episodes.length})`;
-}
+function renderChart(){const p=periodData(),items=[...p.movies,...p.episodes],b=bounds(),map={};let d=new Date(b.from);d.setHours(0,0,0,0);const end=new Date(b.to);end.setHours(23,59,59,999);while(d<=end){map[dayKey(d)]=0;d.setDate(d.getDate()+1)}items.forEach(x=>{const k=dayKey(x.date);if(k in map)map[k]+=METRIC==="bytes"?(x.size||0):1});const vals=Object.values(map),max=Math.max(1,...vals);el("chartTitle").textContent=METRIC==="bytes"?"Datenvolumen pro Tag":"Downloads pro Tag";el("chartSubtitle").textContent=METRIC==="bytes"?"Importiertes Volumen im gewählten Zeitraum":"Grabbed Releases im gewählten Zeitraum";el("chart").innerHTML=Object.entries(map).map(([k,v])=>{const label=new Intl.DateTimeFormat("de-DE",{day:"2-digit",month:"2-digit"}).format(new Date(k+"T12:00:00")),txt=METRIC==="bytes"?bytes(v):v;return`<div class="bar-wrap" data-tip="${label}: ${txt}"><div class="bar" style="height:${Math.max(2,v/max*100)}%"></div></div>`}).join("")}
 
-function renderChart(){
-  const p=periodData();
-  const days=currentDays();
-  const counts={};
+function filteredItems(){const p=periodData();let items=[...(TAB==="movies"?p.movies:TAB==="episodes"?p.episodes:p.failed)];const q=el("search").value.trim().toLowerCase();if(q)items=items.filter(x=>[x.title,x.episodeCode,x.episodeTitle,x.originalRelease,x.targetFolder,x.targetFile,x.releaseGroup,x.indexer,x.downloadClient,x.reason].join(" ").toLowerCase().includes(q));for(const [id,key] of [["indexer","indexer"],["quality","quality"],["group","releaseGroup"],["client","downloadClient"],["library","library"]]){const v=el(id).value;if(v)items=items.filter(x=>x[key]===v)}if(TAB==="episodes"&&el("seriesType").value)items=items.filter(x=>x.releaseType===el("seriesType").value);const up=el("upgrade").value;if(up)items=items.filter(x=>up==="yes"?x.isUpgrade:!x.isUpgrade);const sort=el("sort").value;items.sort((a,b)=>sort==="oldest"?a.timestamp-b.timestamp:sort==="size"?(b.size||0)-(a.size||0):sort==="title"?a.title.localeCompare(b.title,"de"):sort==="titleDesc"?b.title.localeCompare(a.title,"de"):b.timestamp-a.timestamp);return items}
 
-  for(let i=days-1;i>=0;i--){
-    const d=new Date();
-    d.setHours(0,0,0,0);
-    d.setDate(d.getDate()-i);
-    const y=d.getFullYear();
-    const m=String(d.getMonth()+1).padStart(2,"0");
-    const day=String(d.getDate()).padStart(2,"0");
-    counts[`${y}-${m}-${day}`]=0;
-  }
+function groupEpisodes(items){const map=new Map();for(const x of items){const key=`${x.seriesId}|${x.seasonNumber}|${x.releaseType}|${x.originalRelease}`;if(!map.has(key))map.set(key,{...x,grouped:true,episodeCount:0,size:0,episodeCodes:[]});const g=map.get(key);g.episodeCount++;g.size+=(x.size||0);if(x.episodeCode)g.episodeCodes.push(x.episodeCode);g.timestamp=Math.max(g.timestamp,x.timestamp)}return[...map.values()].sort((a,b)=>b.timestamp-a.timestamp)}
+function renderList(){let items=filteredItems();if(TAB==="episodes"&&el("groupSeries").checked)items=groupEpisodes(items);CURRENT=items;el("empty").hidden=items.length!==0;el("list").innerHTML=items.map((x,i)=>card(x,i)).join("");document.querySelectorAll("[data-detail]").forEach(b=>b.onclick=()=>openDetails(CURRENT[Number(b.dataset.detail)]))}
 
-  [...p.movies,...p.episodes].forEach(x=>{
-    const d=new Date(x.date);
-    const y=d.getFullYear();
-    const m=String(d.getMonth()+1).padStart(2,"0");
-    const day=String(d.getDate()).padStart(2,"0");
-    const k=`${y}-${m}-${day}`;
-    if(k in counts) counts[k]++;
-  });
+function card(x,i){const failed=x.kind==="failed";const subtitle=failed?(x.mediaKind==="movie"?"Film":"Serie"):(x.kind==="movie"?esc(x.year||""):x.grouped?`${x.episodeCount} Episoden · Staffel ${x.seasonNumber??"?"}`:`${esc(x.episodeCode)}${x.episodeTitle?" · "+esc(x.episodeTitle):""}`);const img=x.poster?`<img class="poster" src="${esc(x.poster)}" loading="lazy">`:`<div class="poster"></div>`;const title=x.arrUrl?`<a class="title-link" href="${esc(x.arrUrl)}" target="_blank" rel="noopener">${esc(x.title)}</a>`:esc(x.title);return`<article class="item ${failed?"failed-item":""}">${img}<div><div class="title">${title}</div><div class="meta">${subtitle}</div>${x.quality?`<span class="badge">${esc(x.quality)}</span>`:""}${x.releaseGroup?`<span class="badge">${esc(x.releaseGroup)}</span>`:""}${x.indexer?`<span class="badge indexer">${esc(x.indexer)}</span>`:""}${x.releaseType==="season_pack"?`<span class="badge pack">Season Pack</span>`:""}${x.isUpgrade?`<span class="badge upgrade">Upgrade</span>`:""}${failed?`<span class="badge fail">Fehlgeschlagen</span>`:""}</div><div><div class="label">Original Release</div><div class="release">${esc(x.originalRelease||"–")}</div>${x.downloadClient?`<div class="label secondary-label">Download Client</div><div class="release">${esc(x.downloadClient)}</div>`:""}${failed?`<div class="label secondary-label">Fehler</div><div class="reason">${esc(x.reason)}</div>`:""}</div><div>${failed?"":`<div class="label">Zielordner auf Unraid</div><div class="path">${esc(x.targetFolder||"–")}</div>${x.targetFile&&!x.grouped?`<div class="path path-file">${esc(x.targetFile)}</div>`:""}`}</div><div class="right"><div class="size">${failed?"":bytes(x.size)}</div><div class="date-block"><div class="date-label">${failed?"Zeit":"Grab"}</div><div class="date">${fmtDate(x.grabDate||x.date)}</div></div>${!failed?`<div class="date-block import-time"><div class="date-label">Import</div><div class="date">${fmtDate(x.importDate)}</div></div>`:""}<button class="details-btn" data-detail="${i}">Details</button></div></article>`}
 
-  const vals=Object.values(counts);
-  const max=Math.max(1,...vals);
+function renderChips(){const defs=[["indexer","Indexer"],["quality","Qualität"],["group","Group"],["client","Client"],["library","Library"],["seriesType","Typ"],["upgrade","Upgrade"]];const chips=[];for(const[id,label]of defs){const v=el(id).value;if(v)chips.push(`<span class="chip">${label}: ${esc(el(id).selectedOptions[0]?.text||v)}</span>`)}if(CUSTOM_RANGE)chips.push(`<span class="chip">Zeitraum: ${CUSTOM_RANGE.from.toLocaleDateString("de-DE")}–${CUSTOM_RANGE.to.toLocaleDateString("de-DE")}</span>`);el("activeFilters").innerHTML=chips.join("")}
+function openDetails(x){el("detailsBody").innerHTML=`<h2>${esc(x.title)}</h2><p>${esc(x.episodeCode||"")} ${esc(x.episodeTitle||"")}</p><dl><dt>Indexer</dt><dd>${esc(x.indexer||"–")}</dd><dt>Release Group</dt><dd>${esc(x.releaseGroup||"–")}</dd><dt>Qualität</dt><dd>${esc(x.quality||"–")}</dd><dt>Original Release</dt><dd class="mono">${esc(x.originalRelease||"–")}</dd><dt>Zielordner</dt><dd class="mono">${esc(x.targetFolder||"–")}</dd><dt>Zieldatei</dt><dd class="mono">${esc(x.targetFile||"–")}</dd><dt>Grab</dt><dd>${fmtDate(x.grabDate||x.date)}</dd><dt>Import</dt><dd>${fmtDate(x.importDate)}</dd></dl>${x.arrUrl?`<a class="arr-button" href="${esc(x.arrUrl)}" target="_blank" rel="noopener">In ${x.kind==="movie"?"Radarr":"Sonarr"} öffnen ↗</a>`:""}`;el("details").showModal()}
+function exportData(type){const data=CURRENT;if(type==="json"){download("usenet-stats.json",JSON.stringify(data,null,2),"application/json");return}const keys=["title","year","episodeCode","episodeTitle","releaseType","quality","releaseGroup","indexer","downloadClient","originalRelease","targetFolder","targetFile","grabDate","importDate","size"];const rows=[keys.join(";")].concat(data.map(x=>keys.map(k=>`"${String(x[k]??"").replaceAll('"','""')}"`).join(";")));download("usenet-stats.csv",rows.join("\n"),"text/csv;charset=utf-8")}
+function download(name,text,type){const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([text],{type}));a.download=name;a.click();URL.revokeObjectURL(a.href)}
+function clearFilters(){["search","indexer","quality","group","client","library","seriesType","upgrade"].forEach(id=>el(id).value="");el("sort").value="newest";CUSTOM_RANGE=null;el("dateFrom").value=el("dateTo").value="";renderAll()}
 
-  el("chart").innerHTML=Object.entries(counts).map(([d,n])=>{
-    const label=new Intl.DateTimeFormat("de-DE",{
-      day:"2-digit",month:"2-digit"
-    }).format(new Date(d+"T12:00:00"));
-
-    return `<div class="bar-wrap" data-tip="${label}: ${n}">
-      <div class="bar" style="height:${Math.max(2,n/max*100)}%"></div>
-    </div>`;
-  }).join("");
-}
-
-function renderList(){
-  if(!DATA) return;
-
-  const p=periodData();
-  let items=[...(TAB==="movies"?p.movies:p.episodes)];
-
-  const q=el("search").value.trim().toLowerCase();
-  const qual=el("quality").value;
-
-  if(q){
-    items=items.filter(x=>[
-      x.title,x.episodeCode,x.episodeTitle,x.originalRelease,
-      x.targetFolder,x.targetFile,x.releaseGroup,x.indexer,x.downloadClient
-    ].join(" ").toLowerCase().includes(q));
-  }
-
-  if(qual){
-    items=items.filter(x=>
-      (x.quality||"").includes(qual) ||
-      (x.originalRelease||"").includes(qual)
-    );
-  }
-
-  const sort=el("sort").value;
-
-  items.sort((a,b)=>
-    sort==="oldest" ? a.timestamp-b.timestamp :
-    sort==="size" ? b.size-a.size :
-    sort==="title" ? a.title.localeCompare(b.title,"de") :
-    b.timestamp-a.timestamp
-  );
-
-  el("empty").hidden=items.length!==0;
-
-  el("list").innerHTML=items.map(x=>{
-    const subtitle=x.kind==="movie"
-      ? `${esc(x.year||"")}`
-      : `${esc(x.episodeCode)}${x.episodeTitle?" · "+esc(x.episodeTitle):""}`;
-
-    const img=x.poster
-      ? `<img class="poster" src="${esc(x.poster)}" loading="lazy">`
-      : `<div class="poster"></div>`;
-
-    return `<article class="item">
-      ${img}
-
-      <div>
-        <div class="title">${esc(x.title)}</div>
-        <div class="meta">${subtitle}</div>
-
-        ${x.quality?`<span class="badge">${esc(x.quality)}</span>`:""}
-        ${x.releaseGroup?`<span class="badge">${esc(x.releaseGroup)}</span>`:""}
-        ${x.indexer?`<span class="badge indexer">Indexer: ${esc(x.indexer)}</span>`:""}
-        ${x.isUpgrade?`<span class="badge upgrade">Upgrade</span>`:""}
-      </div>
-
-      <div>
-        <div class="label">Original Release</div>
-        <div class="release">${esc(x.originalRelease||"–")}</div>
-        ${x.downloadClient?`
-          <div class="label secondary-label">Download Client</div>
-          <div class="release">${esc(x.downloadClient)}</div>
-        `:""}
-      </div>
-
-      <div>
-        <div class="label">Zielordner auf Unraid</div>
-        <div class="path">${esc(x.targetFolder||"–")}</div>
-        ${x.targetFile?`<div class="path path-file">${esc(x.targetFile)}</div>`:""}
-      </div>
-
-      <div class="right">
-        <div class="size">${esc(x.sizeText||bytes(x.size))}</div>
-
-        <div class="date-block">
-          <div class="date-label">Grab</div>
-          <div class="date">${fmtDate(x.grabDate || x.date)}</div>
-        </div>
-
-        <div class="date-block import-time">
-          <div class="date-label">Import</div>
-          <div class="date">${fmtDate(x.importDate)}</div>
-        </div>
-      </div>
-    </article>`;
-  }).join("");
-}
-
-document.querySelectorAll(".tab").forEach(b=>b.addEventListener("click",()=>{
-  document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
-  b.classList.add("active");
-  TAB=b.dataset.tab;
-  renderList();
-}));
-
-["search","quality","sort"].forEach(id=>
-  el(id).addEventListener("input",renderList)
-);
-
-el("days").addEventListener("change",renderAll);
-el("refresh").addEventListener("click",()=>load(true));
-
-load(false);
+for(const id of["search","indexer","quality","group","client","library","seriesType","upgrade","sort","groupSeries"]){el(id).addEventListener(id==="search"?"input":"change",()=>{renderList();renderChips()})}
+el("compact").onchange=()=>document.body.classList.toggle("compact",el("compact").checked);
+el("days").onchange=()=>{CUSTOM_RANGE=null;renderAll()};el("refresh").onclick=()=>load(true);el("clearFilters").onclick=clearFilters;el("exportCsv").onclick=()=>exportData("csv");el("exportJson").onclick=()=>exportData("json");el("closeDetails").onclick=()=>el("details").close();
+el("preset4k").onclick=()=>{el("quality").value=[...el("quality").options].find(o=>/2160/i.test(o.value))?.value||"";el("search").value="WEB";renderAll()};
+el("applyDates").onclick=()=>{if(!el("dateFrom").value||!el("dateTo").value)return;CUSTOM_RANGE={from:new Date(el("dateFrom").value+"T00:00:00"),to:new Date(el("dateTo").value+"T23:59:59")};renderAll()};
+document.querySelectorAll(".quick").forEach(b=>b.onclick=()=>{const n=new Date(),start=new Date(n),end=new Date(n);if(b.dataset.range==="today"){start.setHours(0,0,0,0)}else if(b.dataset.range==="yesterday"){start.setDate(start.getDate()-1);start.setHours(0,0,0,0);end.setDate(end.getDate()-1);end.setHours(23,59,59,999)}else{const diff=(n.getDay()+6)%7;start.setDate(n.getDate()-diff);start.setHours(0,0,0,0)}CUSTOM_RANGE={from:start,to:end};renderAll()});
+document.querySelectorAll(".metric").forEach(b=>b.onclick=()=>{document.querySelectorAll(".metric").forEach(x=>x.classList.remove("active"));b.classList.add("active");METRIC=b.dataset.metric;renderChart()});
+document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>{document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));b.classList.add("active");TAB=b.dataset.tab;el("seriesType").disabled=TAB!=="episodes";el("groupSeries").disabled=TAB!=="episodes";renderList()});
+load();
