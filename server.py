@@ -12,7 +12,9 @@ import app as core
 app = core.app
 
 CACHE_FILE = Path(os.getenv("PERSISTENT_CACHE_FILE", "/config/stats-cache.json"))
+METADATA_CACHE_FILE = Path(os.getenv("METADATA_CACHE_FILE", "/config/api-metadata-cache.json"))
 AUTO_REFRESH_SECONDS = max(60, int(os.getenv("AUTO_REFRESH_SECONDS", "900")))
+METADATA_CACHE_SECONDS = max(900, int(os.getenv("METADATA_CACHE_SECONDS", "21600")))
 STARTUP_REFRESH_DELAY = max(0, int(os.getenv("STARTUP_REFRESH_DELAY", "2")))
 
 _state_lock = threading.Lock()
@@ -24,13 +26,49 @@ _state = {
     "lastRefreshFinished": None,
 }
 
-# Reuse HTTP connections to the local *arr instances. This makes repeated
-# history/metadata requests noticeably cheaper than opening a new TCP
-# connection for every request.
+_metadata_lock = threading.Lock()
+_metadata_cache = {}
 _session = requests.Session()
 
 
+def atomic_json_write(path, payload):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("w", encoding="utf-8") as fh:
+        json.dump(payload, fh, ensure_ascii=False, separators=(",", ":"))
+    os.replace(tmp, path)
+
+
+def load_metadata_cache():
+    global _metadata_cache
+    try:
+        if METADATA_CACHE_FILE.exists():
+            with METADATA_CACHE_FILE.open("r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            if isinstance(data, dict):
+                _metadata_cache = data
+    except Exception:
+        _metadata_cache = {}
+
+
+def metadata_key(base, endpoint, params):
+    endpoint = endpoint.strip("/").lower()
+    # Sonarr's episode-by-series calls are by far the most numerous requests
+    # during a 90-day rebuild, and their metadata is stable enough to reuse.
+    if endpoint == "episode" and params and params.get("seriesId") is not None:
+        return f"{base}|episode|seriesId={params.get('seriesId')}"
+    return None
+
+
 def pooled_api_get(base, key, endpoint, params=None):
+    cache_key = metadata_key(base, endpoint, params)
+    if cache_key:
+        now = time.time()
+        with _metadata_lock:
+            entry = _metadata_cache.get(cache_key)
+            if entry and now - float(entry.get("timestamp", 0)) < METADATA_CACHE_SECONDS:
+                return entry.get("data", [])
+
     r = _session.get(
         f"{base}/api/v3/{endpoint.lstrip('/')}",
         headers={"X-Api-Key": key},
@@ -38,7 +76,18 @@ def pooled_api_get(base, key, endpoint, params=None):
         timeout=core.REQUEST_TIMEOUT,
     )
     r.raise_for_status()
-    return r.json()
+    data = r.json()
+
+    if cache_key:
+        with _metadata_lock:
+            _metadata_cache[cache_key] = {"timestamp": time.time(), "data": data}
+            snapshot = dict(_metadata_cache)
+        try:
+            atomic_json_write(METADATA_CACHE_FILE, snapshot)
+        except Exception:
+            pass
+
+    return data
 
 
 core.api_get = pooled_api_get
@@ -77,17 +126,17 @@ def load_disk_cache():
 
 
 def save_disk_cache(payload):
-    CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = CACHE_FILE.with_suffix(CACHE_FILE.suffix + ".tmp")
-    with tmp.open("w", encoding="utf-8") as fh:
-        json.dump(payload, fh, ensure_ascii=False, separators=(",", ":"))
-    os.replace(tmp, CACHE_FILE)
+    atomic_json_write(CACHE_FILE, payload)
 
 
 def refresh_worker():
     try:
         payload = core.build_payload(force=True)
-        save_disk_cache(payload)
+        try:
+            save_disk_cache(payload)
+        except Exception:
+            # The in-memory cache is still valid when /config is not mounted.
+            pass
         with _state_lock:
             _state["lastError"] = ""
             _state["lastRefreshFinished"] = time.time()
@@ -143,8 +192,8 @@ def stats_view():
     force = request.args.get("refresh") == "1"
     payload = core._cache.get("payload")
 
-    # Never make the browser wait for a complete 90-day rebuild. Serve the
-    # last known data immediately and refresh in the background.
+    # Stale-while-revalidate: the UI gets the last known dataset immediately.
+    # Expensive Radarr/Sonarr work happens only in a background thread.
     if payload is None:
         trigger_refresh()
         return jsonify(response_payload(None, cold_start=True))
@@ -168,7 +217,6 @@ def health_view():
     )
 
 
-# Replace the original synchronous endpoints while keeping the same URLs.
 app.view_functions["stats"] = stats_view
 app.view_functions["health"] = health_view
 
@@ -183,5 +231,6 @@ def maintenance_loop():
         time.sleep(min(60, max(15, AUTO_REFRESH_SECONDS // 4)))
 
 
+load_metadata_cache()
 load_disk_cache()
 threading.Thread(target=maintenance_loop, name="stats-maintenance", daemon=True).start()
