@@ -128,28 +128,6 @@ def download_client(rec):
     return data.get("downloadClient") or data.get("downloadClientName") or ""
 
 
-def build_grab_indexes(history, id_key):
-    by_download_id, by_title = {}, {}
-    for rec in history:
-        if str(rec.get("eventType", "")).lower() != "grabbed" or not is_usenet(rec):
-            continue
-        did = get_download_id(rec)
-        if did:
-            by_download_id[str(did)] = rec
-        source, entity_id = source_title(rec), rec.get(id_key)
-        if source and entity_id is not None:
-            by_title.setdefault((entity_id, source.strip().lower()), rec)
-    return by_download_id, by_title
-
-
-def match_grab(rec, by_download_id, by_title, id_key):
-    did = get_download_id(rec)
-    if did and str(did) in by_download_id:
-        return by_download_id[str(did)]
-    source, entity_id = source_title(rec), rec.get(id_key)
-    return by_title.get((entity_id, source.strip().lower())) if source and entity_id is not None else None
-
-
 def poster_of(entity):
     for img in entity.get("images") or []:
         if img.get("coverType") == "poster":
@@ -174,6 +152,57 @@ def episode_release_type(source):
     return "episode"
 
 
+def build_grab_indexes(history, id_key):
+    by_download_id, by_title = {}, {}
+    for rec in history:
+        if str(rec.get("eventType", "")).lower() != "grabbed" or not is_usenet(rec):
+            continue
+        did = get_download_id(rec)
+        if did:
+            by_download_id[str(did)] = rec
+        src, entity_id = source_title(rec), rec.get(id_key)
+        if src and entity_id is not None:
+            by_title.setdefault((entity_id, src.strip().lower()), rec)
+    return by_download_id, by_title
+
+
+def match_grab(rec, by_download_id, by_title, id_key):
+    did = get_download_id(rec)
+    if did and str(did) in by_download_id:
+        return by_download_id[str(did)]
+    src, entity_id = source_title(rec), rec.get(id_key)
+    return by_title.get((entity_id, src.strip().lower())) if src and entity_id is not None else None
+
+
+def grab_rows(history, entities, id_key, media_kind):
+    rows = []
+    for rec in history:
+        if str(rec.get("eventType", "")).lower() != "grabbed" or not is_usenet(rec):
+            continue
+        entity = entities.get(rec.get(id_key), {})
+        dt = parse_dt(rec.get("date"))
+        src = source_title(rec)
+        did = str(get_download_id(rec) or "")
+        fallback = f"{media_kind}:{rec.get(id_key)}:{src.lower()}:{rec.get('date')}"
+        rows.append({
+            "grabKey": did or fallback,
+            "downloadId": did,
+            "mediaKind": media_kind,
+            "entityId": rec.get(id_key),
+            "title": entity.get("title") or "Unbekannt",
+            "year": entity.get("year") or "",
+            "date": rec.get("date") or "",
+            "timestamp": dt.timestamp() if dt else 0,
+            "indexer": get_indexer(rec) or "Unbekannt",
+            "downloadClient": download_client(rec),
+            "quality": quality_label(rec),
+            "releaseGroup": release_group_from_name(src),
+            "originalRelease": src,
+            "releaseType": episode_release_type(src) if media_kind == "series" else "movie",
+        })
+    return rows
+
+
 def failed_items(history, entities, id_key, kind):
     results = []
     for rec in history:
@@ -183,14 +212,14 @@ def failed_items(history, entities, id_key, kind):
         entity = entities.get(rec.get(id_key), {})
         data = rec.get("data") or {}
         dt = parse_dt(rec.get("date"))
-        source = source_title(rec)
+        src = source_title(rec)
         slug = entity.get("titleSlug") or ""
         arr_url = f"{RADARR_URL}/movie/{slug}" if kind == "movie" and slug else (f"{SONARR_URL}/series/{slug}" if slug else "")
         results.append({
             "kind": "failed", "mediaKind": kind, "title": entity.get("title") or "Unbekannt", "year": entity.get("year") or "",
-            "date": rec.get("date") or "", "timestamp": dt.timestamp() if dt else 0, "originalRelease": source,
+            "date": rec.get("date") or "", "timestamp": dt.timestamp() if dt else 0, "originalRelease": src,
             "indexer": get_indexer(rec), "downloadClient": download_client(rec), "quality": quality_label(rec),
-            "releaseGroup": release_group_from_name(source), "reason": data.get("message") or data.get("reason") or data.get("errorMessage") or "Download/Import fehlgeschlagen",
+            "releaseGroup": release_group_from_name(src), "reason": data.get("message") or data.get("reason") or data.get("errorMessage") or "Download/Import fehlgeschlagen",
             "poster": poster_of(entity), "arrUrl": arr_url,
         })
     return results
@@ -206,29 +235,32 @@ def radarr_data(since):
             continue
         data, movie = rec.get("data") or {}, movies.get(rec.get("movieId"), {})
         grab = match_grab(rec, grabbed_by_id, grabbed_by_title, "movieId")
-        imported, source = data.get("importedPath") or data.get("destinationPath") or "", source_title(rec)
-        identity = (rec.get("id"), imported, source)
+        imported, src = data.get("importedPath") or data.get("destinationPath") or "", source_title(rec)
+        identity = (rec.get("id"), imported, src)
         if identity in seen:
             continue
         seen.add(identity)
         mf = movie.get("movieFile") or {}
-        size = data.get("size") or data.get("fileSize") or mf.get("size") or 0
+        size = int(data.get("size") or data.get("fileSize") or mf.get("size") or 0)
         folder = movie.get("path") or (os.path.dirname(imported) if imported else "")
         import_dt, grab_dt = parse_dt(rec.get("date")), parse_dt((grab or {}).get("date"))
         display_dt = grab_dt or import_dt
         slug = movie.get("titleSlug") or ""
+        did = str(get_download_id(grab or rec) or "")
+        grab_key = did or f"movie:{rec.get('movieId')}:{src.lower()}:{(grab or rec).get('date')}"
         items.append({
-            "kind": "movie", "date": display_dt.isoformat() if display_dt else rec.get("date"), "grabDate": (grab or {}).get("date") or "", "importDate": rec.get("date") or "",
+            "kind": "movie", "movieId": rec.get("movieId"), "grabKey": grab_key, "downloadId": did,
+            "date": display_dt.isoformat() if display_dt else rec.get("date"), "grabDate": (grab or {}).get("date") or "", "importDate": rec.get("date") or "",
             "timestamp": display_dt.timestamp() if display_dt else 0, "importTimestamp": import_dt.timestamp() if import_dt else 0,
-            "title": movie.get("title") or "Unbekannter Film", "year": movie.get("year") or "", "originalRelease": source,
+            "title": movie.get("title") or "Unbekannter Film", "year": movie.get("year") or "", "originalRelease": src,
             "targetFolder": host_path(folder), "targetFile": host_path(imported), "quality": quality_label(rec) or mf.get("quality", {}).get("quality", {}).get("name", ""),
-            "releaseGroup": data.get("releaseGroup") or release_group_from_name(source), "indexer": get_indexer(grab or {}) or get_indexer(rec),
-            "downloadClient": download_client(grab or {}) or download_client(rec), "size": int(size or 0), "sizeText": human_size(size),
+            "releaseGroup": data.get("releaseGroup") or release_group_from_name(src), "indexer": get_indexer(grab or {}) or get_indexer(rec) or "Unbekannt",
+            "downloadClient": download_client(grab or {}) or download_client(rec), "size": size, "sizeText": human_size(size),
             "poster": poster_of(movie), "isUpgrade": str(data.get("isUpgrade", "")).lower() == "true", "library": library_from_path(folder),
             "arrUrl": f"{RADARR_URL}/movie/{slug}" if slug else RADARR_URL,
         })
     items.sort(key=lambda x: x["timestamp"], reverse=True)
-    return items, failed_items(history, movies, "movieId", "movie")
+    return items, failed_items(history, movies, "movieId", "movie"), grab_rows(history, movies, "movieId", "movie")
 
 
 def sonarr_data(since):
@@ -250,8 +282,8 @@ def sonarr_data(since):
         data, ser = rec.get("data") or {}, series.get(rec.get("seriesId"), {})
         ep = episode_by_id.get(rec.get("episodeId"), {})
         grab = match_grab(rec, grabbed_by_id, grabbed_by_title, "seriesId")
-        imported, source = data.get("importedPath") or data.get("destinationPath") or "", source_title(rec)
-        identity = (rec.get("id"), rec.get("episodeId"), imported, source)
+        imported, src = data.get("importedPath") or data.get("destinationPath") or "", source_title(rec)
+        identity = (rec.get("id"), rec.get("episodeId"), imported, src)
         if identity in seen:
             continue
         seen.add(identity)
@@ -262,18 +294,21 @@ def sonarr_data(since):
         display_dt = grab_dt or import_dt
         size = int(data.get("size") or data.get("fileSize") or 0)
         slug = ser.get("titleSlug") or ""
+        did = str(get_download_id(grab or rec) or "")
+        grab_key = did or f"series:{rec.get('seriesId')}:{src.lower()}:{(grab or rec).get('date')}"
         items.append({
-            "kind": "episode", "date": display_dt.isoformat() if display_dt else rec.get("date"), "grabDate": (grab or {}).get("date") or "", "importDate": rec.get("date") or "",
+            "kind": "episode", "seriesId": rec.get("seriesId"), "grabKey": grab_key, "downloadId": did,
+            "date": display_dt.isoformat() if display_dt else rec.get("date"), "grabDate": (grab or {}).get("date") or "", "importDate": rec.get("date") or "",
             "timestamp": display_dt.timestamp() if display_dt else 0, "importTimestamp": import_dt.timestamp() if import_dt else 0,
-            "title": ser.get("title") or "Unbekannte Serie", "year": ser.get("year") or "", "seriesId": rec.get("seriesId"),
-            "seasonNumber": season, "episodeNumber": number, "episodeCode": episode_code, "episodeTitle": ep.get("title") or "", "originalRelease": source,
-            "targetFolder": host_path(folder), "targetFile": host_path(imported), "quality": quality_label(rec), "releaseGroup": data.get("releaseGroup") or release_group_from_name(source),
-            "indexer": get_indexer(grab or {}) or get_indexer(rec), "downloadClient": download_client(grab or {}) or download_client(rec),
+            "title": ser.get("title") or "Unbekannte Serie", "year": ser.get("year") or "", "seasonNumber": season, "episodeNumber": number,
+            "episodeCode": episode_code, "episodeTitle": ep.get("title") or "", "originalRelease": src,
+            "targetFolder": host_path(folder), "targetFile": host_path(imported), "quality": quality_label(rec), "releaseGroup": data.get("releaseGroup") or release_group_from_name(src),
+            "indexer": get_indexer(grab or {}) or get_indexer(rec) or "Unbekannt", "downloadClient": download_client(grab or {}) or download_client(rec),
             "size": size, "sizeText": human_size(size), "poster": poster_of(ser), "isUpgrade": str(data.get("isUpgrade", "")).lower() == "true",
-            "library": library_from_path(folder), "releaseType": episode_release_type(source), "arrUrl": f"{SONARR_URL}/series/{slug}" if slug else SONARR_URL,
+            "library": library_from_path(folder), "releaseType": episode_release_type(src), "arrUrl": f"{SONARR_URL}/series/{slug}" if slug else SONARR_URL,
         })
     items.sort(key=lambda x: x["timestamp"], reverse=True)
-    return items, failed_items(history, series, "seriesId", "series")
+    return items, failed_items(history, series, "seriesId", "series"), grab_rows(history, series, "seriesId", "series")
 
 
 def build_payload(force=False):
@@ -281,9 +316,15 @@ def build_payload(force=False):
     if not force and _cache["payload"] is not None and _cache["expires"] > now:
         return _cache["payload"]
     since = datetime.now(timezone.utc) - timedelta(days=MAX_DAYS)
-    movies, movie_failed = radarr_data(since) if RADARR_API_KEY else ([], [])
-    episodes, series_failed = sonarr_data(since) if SONARR_API_KEY else ([], [])
-    payload = {"generatedAt": datetime.now(timezone.utc).isoformat(), "maxDays": MAX_DAYS, "arr": {"radarr": RADARR_URL, "sonarr": SONARR_URL}, "movies": movies, "episodes": episodes, "failed": sorted(movie_failed + series_failed, key=lambda x: x["timestamp"], reverse=True)}
+    movies, movie_failed, movie_grabs = radarr_data(since) if RADARR_API_KEY else ([], [], [])
+    episodes, series_failed, series_grabs = sonarr_data(since) if SONARR_API_KEY else ([], [], [])
+    payload = {
+        "generatedAt": datetime.now(timezone.utc).isoformat(), "maxDays": MAX_DAYS,
+        "arr": {"radarr": RADARR_URL, "sonarr": SONARR_URL},
+        "movies": movies, "episodes": episodes,
+        "grabs": sorted(movie_grabs + series_grabs, key=lambda x: x["timestamp"], reverse=True),
+        "failed": sorted(movie_failed + series_failed, key=lambda x: x["timestamp"], reverse=True),
+    }
     _cache["payload"], _cache["expires"] = payload, now + CACHE_SECONDS
     return payload
 
@@ -295,8 +336,9 @@ def index():
 
 @app.route("/api/stats")
 def stats():
+    force = request.args.get("refresh") == "1"
     try:
-        return jsonify(build_payload(request.args.get("refresh") == "1"))
+        return jsonify(build_payload(force))
     except requests.RequestException as e:
         return jsonify({"error": str(e)}), 502
     except Exception as e:
