@@ -12,14 +12,13 @@
     <div>
       <div class="eyebrow">RADARR · SONARR · USENET</div>
       <h1>Usenet Downloads</h1>
-      <p id="subtitle">Importierte Filme und Serien im gewählten Zeitraum.</p>
+      <p>Importierte Filme und Serien mit Grab-, Indexer- und Import-Historie.</p>
     </div>
     <div class="toolbar">
-      <select id="days">
-        <option value="7">7 Tage</option>
-        <option value="30" selected>30 Tage</option>
-        <option value="90">90 Tage</option>
-      </select>
+      <button class="quick" data-range="today">Heute</button>
+      <button class="quick" data-range="yesterday">Gestern</button>
+      <button class="quick" data-range="week">Diese Woche</button>
+      <select id="days"><option value="7">7 Tage</option><option value="30" selected>30 Tage</option><option value="90">90 Tage</option></select>
       <button id="refresh">↻ Aktualisieren</button>
     </div>
   </header>
@@ -31,9 +30,17 @@
     <div class="stat"><span>Gesamt</span><strong id="totalSize">–</strong><small id="generated">–</small></div>
   </section>
 
+  <section class="insights">
+    <div class="insight"><span>Top Indexer</span><strong id="topIndexer">–</strong></div>
+    <div class="insight"><span>Top Release Group</span><strong id="topGroup">–</strong></div>
+    <div class="insight"><span>Upgrades</span><strong id="upgradeCount">–</strong></div>
+    <div class="insight"><span>Season Packs</span><strong id="packCount">–</strong></div>
+  </section>
+
   <section class="chart-card">
-    <div class="section-title">
-      <div><h2>Downloads pro Tag</h2><p>Importierte Dateien aus dem Usenet</p></div>
+    <div class="section-title chart-head">
+      <div><h2 id="chartTitle">Downloads pro Tag</h2><p id="chartSubtitle">Grabbed Releases im gewählten Zeitraum</p></div>
+      <div class="segmented"><button class="metric active" data-metric="count">Downloads</button><button class="metric" data-metric="bytes">Datenvolumen</button></div>
     </div>
     <div id="chart" class="chart"></div>
   </section>
@@ -41,29 +48,41 @@
   <nav class="tabs">
     <button class="tab active" data-tab="movies">🎬 Filme <span id="movieTabCount"></span></button>
     <button class="tab" data-tab="episodes">📺 Serien <span id="episodeTabCount"></span></button>
+    <button class="tab danger-tab" data-tab="failed">⚠ Fehlgeschlagen <span id="failedTabCount"></span></button>
   </nav>
 
-  <section class="filters">
-    <input id="search" type="search" placeholder="Titel, Release, Indexer oder Pfad durchsuchen …">
-    <select id="quality">
-      <option value="">Alle Qualitäten</option>
-      <option value="2160">4K / 2160p</option>
-      <option value="1080">1080p</option>
-      <option value="720">720p</option>
-    </select>
-    <select id="sort">
-      <option value="newest">Neueste zuerst</option>
-      <option value="oldest">Älteste zuerst</option>
-      <option value="size">Größte zuerst</option>
-      <option value="title">Titel A–Z</option>
-    </select>
+  <section class="filters-panel">
+    <div class="filters primary-filters">
+      <input id="search" type="search" placeholder="Titel, Release, Indexer, Group oder Pfad durchsuchen …">
+      <select id="indexer"><option value="">Alle Indexer</option></select>
+      <select id="quality"><option value="">Alle Qualitäten</option></select>
+      <select id="group"><option value="">Alle Groups</option></select>
+      <select id="client"><option value="">Alle Clients</option></select>
+      <select id="library"><option value="">Alle Libraries</option></select>
+    </div>
+    <div class="filters secondary-filters">
+      <select id="seriesType"><option value="">Season Pack + Episode</option><option value="season_pack">Nur Season Packs</option><option value="episode">Nur Einzelepisoden</option></select>
+      <select id="upgrade"><option value="">Neu + Upgrades</option><option value="yes">Nur Upgrades</option><option value="no">Keine Upgrades</option></select>
+      <select id="sort"><option value="newest">Neueste zuerst</option><option value="oldest">Älteste zuerst</option><option value="title">Titel A–Z</option><option value="titleDesc">Titel Z–A</option><option value="size">Größte zuerst</option></select>
+      <label class="toggle"><input id="groupSeries" type="checkbox"> Serien gruppieren</label>
+      <label class="toggle"><input id="compact" type="checkbox"> Kompakt</label>
+      <button id="preset4k">4K WEB-DL</button>
+      <button id="clearFilters">Filter löschen</button>
+      <button id="exportCsv">CSV</button>
+      <button id="exportJson">JSON</button>
+    </div>
+    <div class="date-range">
+      <span>Eigener Zeitraum:</span><input type="date" id="dateFrom"><span>bis</span><input type="date" id="dateTo"><button id="applyDates">Anwenden</button>
+    </div>
+    <div id="activeFilters" class="chips"></div>
   </section>
 
   <main id="list"></main>
-  <div id="empty" class="empty" hidden>Keine passenden Usenet-Imports gefunden.</div>
+  <div id="empty" class="empty" hidden>Keine passenden Einträge gefunden.</div>
   <div id="error" class="error" hidden></div>
 </div>
 
+<dialog id="details"><button class="close" id="closeDetails">×</button><div id="detailsBody"></div></dialog>
 <script src="/static/app.js"></script>
 </body>
 </html>
