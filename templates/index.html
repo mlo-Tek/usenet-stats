@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Usenet Stats</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="shell">
+  <header>
+    <div>
+      <div class="eyebrow">RADARR · SONARR · USENET</div>
+      <h1>Usenet Downloads</h1>
+      <p id="subtitle">Importierte Filme und Serien im gewählten Zeitraum.</p>
+    </div>
+    <div class="toolbar">
+      <select id="days">
+        <option value="7">7 Tage</option>
+        <option value="30" selected>30 Tage</option>
+        <option value="90">90 Tage</option>
+      </select>
+      <button id="refresh">↻ Aktualisieren</button>
+    </div>
+  </header>
+
+  <section class="stats">
+    <div class="stat"><span>Filme</span><strong id="movieCount">–</strong><small id="movieSize">–</small></div>
+    <div class="stat"><span>Episoden</span><strong id="episodeCount">–</strong><small id="episodeSize">–</small></div>
+    <div class="stat"><span>Serien</span><strong id="seriesCount">–</strong><small>unterschiedliche Serien</small></div>
+    <div class="stat"><span>Gesamt</span><strong id="totalSize">–</strong><small id="generated">–</small></div>
+  </section>
+
+  <section class="chart-card">
+    <div class="section-title">
+      <div><h2>Downloads pro Tag</h2><p>Importierte Dateien aus dem Usenet</p></div>
+    </div>
+    <div id="chart" class="chart"></div>
+  </section>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="movies">🎬 Filme <span id="movieTabCount"></span></button>
+    <button class="tab" data-tab="episodes">📺 Serien <span id="episodeTabCount"></span></button>
+  </nav>
+
+  <section class="filters">
+    <input id="search" type="search" placeholder="Titel, Release, Indexer oder Pfad durchsuchen …">
+    <select id="quality">
+      <option value="">Alle Qualitäten</option>
+      <option value="2160">4K / 2160p</option>
+      <option value="1080">1080p</option>
+      <option value="720">720p</option>
+    </select>
+    <select id="sort">
+      <option value="newest">Neueste zuerst</option>
+      <option value="oldest">Älteste zuerst</option>
+      <option value="size">Größte zuerst</option>
+      <option value="title">Titel A–Z</option>
+    </select>
+  </section>
+
+  <main id="list"></main>
+  <div id="empty" class="empty" hidden>Keine passenden Usenet-Imports gefunden.</div>
+  <div id="error" class="error" hidden></div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
