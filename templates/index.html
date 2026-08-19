@@ -4,43 +4,57 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Usenet Stats</title>
+  <script>
+    (()=>{try{const m=localStorage.getItem('usenet-stats-theme')||'system';const r=m==='system'?(matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'):m;document.documentElement.dataset.theme=r;document.documentElement.dataset.themeMode=m}catch(e){}})();
+  </script>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <div class="shell">
-  <header>
-    <div>
+  <header class="hero">
+    <div class="hero-copy">
       <div class="eyebrow">RADARR · SONARR · USENET</div>
       <h1>Usenet Downloads</h1>
       <p>Importierte Filme und Serien mit Grab-, Indexer- und Import-Historie.</p>
     </div>
-    <div class="toolbar">
-      <button class="quick" data-range="today">Heute</button>
-      <button class="quick" data-range="yesterday">Gestern</button>
-      <button class="quick" data-range="week">Diese Woche</button>
-      <select id="days"><option value="7">7 Tage</option><option value="30" selected>30 Tage</option><option value="90">90 Tage</option></select>
-      <button id="refresh">↻ Aktualisieren</button>
+
+    <div class="header-actions">
+      <div class="header-meta-row">
+        <div id="syncStatus" class="sync-status"><span class="sync-dot"></span><span id="syncText">Daten werden geladen</span></div>
+        <div class="theme-switch" aria-label="Darstellung">
+          <button class="theme-btn" data-theme="system" title="System">Auto</button>
+          <button class="theme-btn" data-theme="light" title="Hell">Hell</button>
+          <button class="theme-btn" data-theme="dark" title="Dunkel">Dunkel</button>
+        </div>
+      </div>
+      <div class="toolbar">
+        <button class="quick" data-range="today">Heute</button>
+        <button class="quick" data-range="yesterday">Gestern</button>
+        <button class="quick" data-range="week">Diese Woche</button>
+        <select id="days" aria-label="Zeitraum"><option value="7">7 Tage</option><option value="30" selected>30 Tage</option><option value="90">90 Tage</option></select>
+        <button id="refresh" class="primary-action">↻ Aktualisieren</button>
+      </div>
     </div>
   </header>
 
   <section class="stats">
-    <div class="stat"><span>Filme</span><strong id="movieCount">–</strong><small id="movieSize">–</small></div>
-    <div class="stat"><span>Episoden</span><strong id="episodeCount">–</strong><small id="episodeSize">–</small></div>
-    <div class="stat"><span>Serien</span><strong id="seriesCount">–</strong><small>unterschiedliche Serien</small></div>
-    <div class="stat"><span>Gesamt</span><strong id="totalSize">–</strong><small id="generated">–</small></div>
+    <div class="stat accent-blue"><span>Filme</span><strong id="movieCount">–</strong><small id="movieSize">–</small></div>
+    <div class="stat accent-purple"><span>Episoden</span><strong id="episodeCount">–</strong><small id="episodeSize">–</small></div>
+    <div class="stat accent-teal"><span>Serien</span><strong id="seriesCount">–</strong><small>unterschiedliche Serien</small></div>
+    <div class="stat accent-orange"><span>Gesamt</span><strong id="totalSize">–</strong><small id="generated">–</small></div>
   </section>
 
   <section class="insights">
-    <div class="insight"><span>Top Indexer</span><strong id="topIndexer">–</strong></div>
-    <div class="insight"><span>Top Release Group</span><strong id="topGroup">–</strong></div>
-    <div class="insight"><span>Upgrades</span><strong id="upgradeCount">–</strong></div>
-    <div class="insight"><span>Season Packs</span><strong id="packCount">–</strong></div>
+    <div class="insight accent-cyan"><span>Top Indexer</span><strong id="topIndexer">–</strong></div>
+    <div class="insight accent-pink"><span>Top Release Group</span><strong id="topGroup">–</strong></div>
+    <div class="insight accent-green"><span>Upgrades</span><strong id="upgradeCount">–</strong></div>
+    <div class="insight accent-yellow"><span>Season Packs</span><strong id="packCount">–</strong></div>
   </section>
 
   <section class="chart-card">
     <div class="section-title chart-head">
-      <div><h2 id="chartTitle">Downloads pro Tag</h2><p id="chartSubtitle">Grabbed Releases im gewählten Zeitraum</p></div>
-      <div class="segmented"><button class="metric active" data-metric="count">Downloads</button><button class="metric" data-metric="bytes">Datenvolumen</button></div>
+      <div><h2 id="chartTitle">Downloads pro Tag</h2><p id="chartSubtitle">Importierte Dateien im gewählten Zeitraum</p></div>
+      <div class="segmented chart-toggle"><button class="metric active" data-metric="count">Downloads</button><button class="metric" data-metric="bytes">Datenvolumen</button></div>
     </div>
     <div id="chart" class="chart"></div>
   </section>
@@ -53,27 +67,32 @@
   </nav>
 
   <section class="filters-panel" id="mediaFilters">
+    <div class="filter-section-title">Filtern</div>
     <div class="filters primary-filters">
-      <input id="search" type="search" placeholder="Titel, Release, Indexer, Group oder Pfad durchsuchen …">
+      <input id="search" class="search-field" type="search" placeholder="Titel, Release, Indexer, Group oder Pfad durchsuchen …">
       <select id="indexer"><option value="">Alle Indexer</option></select>
       <select id="quality"><option value="">Alle Qualitäten</option></select>
       <select id="group"><option value="">Alle Groups</option></select>
       <select id="client"><option value="">Alle Clients</option></select>
       <select id="library"><option value="">Alle Libraries</option></select>
     </div>
+
+    <div class="filter-section-title secondary-title">Ansicht & Sortierung</div>
     <div class="filters secondary-filters">
       <select id="seriesType"><option value="">Season Pack + Episode</option><option value="season_pack">Nur Season Packs</option><option value="episode">Nur Einzelepisoden</option></select>
       <select id="upgrade"><option value="">Neu + Upgrades</option><option value="yes">Nur Upgrades</option><option value="no">Keine Upgrades</option></select>
       <select id="sort"><option value="newest">Neueste zuerst</option><option value="oldest">Älteste zuerst</option><option value="title">Titel A–Z</option><option value="titleDesc">Titel Z–A</option><option value="size">Größte zuerst</option></select>
-      <label class="toggle"><input id="groupSeries" type="checkbox"> Serien gruppieren</label>
-      <label class="toggle"><input id="compact" type="checkbox"> Kompakt</label>
-      <button id="preset4k">4K WEB-DL</button>
+      <label class="toggle"><input id="groupSeries" type="checkbox"><span>Serien gruppieren</span></label>
+      <label class="toggle"><input id="compact" type="checkbox"><span>Kompakt</span></label>
+      <button id="preset4k" class="soft-accent">4K WEB-DL</button>
       <button id="clearFilters">Filter löschen</button>
       <button id="exportCsv">CSV</button>
       <button id="exportJson">JSON</button>
     </div>
+
     <div class="date-range">
-      <span>Eigener Zeitraum:</span><input type="date" id="dateFrom"><span>bis</span><input type="date" id="dateTo"><button id="applyDates">Anwenden</button>
+      <span class="date-label-main">Eigener Zeitraum</span>
+      <input type="date" id="dateFrom"><span>bis</span><input type="date" id="dateTo"><button id="applyDates">Anwenden</button>
     </div>
     <div id="activeFilters" class="chips"></div>
   </section>
@@ -81,6 +100,7 @@
   <section id="indexerPage" hidden>
     <div class="indexer-head">
       <div>
+        <div class="filter-section-title">Analyse</div>
         <h2>Indexer-Auswertung</h2>
         <p id="indexerPeriod">–</p>
       </div>
@@ -95,12 +115,14 @@
         </select>
       </div>
     </div>
+
     <div class="indexer-summary">
-      <div class="stat"><span>Grabs gesamt</span><strong id="allGrabs">–</strong><small>an SABnzbd übergeben</small></div>
-      <div class="stat"><span>Downloads gesamt</span><strong id="allDownloads">–</strong><small>eindeutige erfolgreiche Grabs</small></div>
-      <div class="stat"><span>Erfolgsquote</span><strong id="allSuccessRate">–</strong><small>Download / Grab</small></div>
-      <div class="stat"><span>Indexer aktiv</span><strong id="activeIndexerCount">–</strong><small>im gewählten Zeitraum</small></div>
+      <div class="stat accent-blue"><span>Grabs gesamt</span><strong id="allGrabs">–</strong><small>an SABnzbd übergeben</small></div>
+      <div class="stat accent-green"><span>Downloads gesamt</span><strong id="allDownloads">–</strong><small>eindeutige erfolgreiche Grabs</small></div>
+      <div class="stat accent-purple"><span>Erfolgsquote</span><strong id="allSuccessRate">–</strong><small>Download / Grab</small></div>
+      <div class="stat accent-orange"><span>Indexer aktiv</span><strong id="activeIndexerCount">–</strong><small>im gewählten Zeitraum</small></div>
     </div>
+
     <div class="indexer-table-wrap">
       <table class="indexer-table">
         <thead><tr><th>Indexer</th><th>Grabs</th><th>Downloads</th><th>Erfolg</th><th>Filme</th><th>Serien</th><th>Episoden</th><th>Season Packs</th><th>Datenvolumen</th></tr></thead>
