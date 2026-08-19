@@ -48,10 +48,11 @@
   <nav class="tabs">
     <button class="tab active" data-tab="movies">🎬 Filme <span id="movieTabCount"></span></button>
     <button class="tab" data-tab="episodes">📺 Serien <span id="episodeTabCount"></span></button>
+    <button class="tab" data-tab="indexers">🌐 Indexer <span id="indexerTabCount"></span></button>
     <button class="tab danger-tab" data-tab="failed">⚠ Fehlgeschlagen <span id="failedTabCount"></span></button>
   </nav>
 
-  <section class="filters-panel">
+  <section class="filters-panel" id="mediaFilters">
     <div class="filters primary-filters">
       <input id="search" type="search" placeholder="Titel, Release, Indexer, Group oder Pfad durchsuchen …">
       <select id="indexer"><option value="">Alle Indexer</option></select>
@@ -75,6 +76,37 @@
       <span>Eigener Zeitraum:</span><input type="date" id="dateFrom"><span>bis</span><input type="date" id="dateTo"><button id="applyDates">Anwenden</button>
     </div>
     <div id="activeFilters" class="chips"></div>
+  </section>
+
+  <section id="indexerPage" hidden>
+    <div class="indexer-head">
+      <div>
+        <h2>Indexer-Auswertung</h2>
+        <p id="indexerPeriod">–</p>
+      </div>
+      <div class="indexer-controls">
+        <input id="indexerSearch" type="search" placeholder="Indexer suchen …">
+        <select id="indexerSort">
+          <option value="grabs">Meiste Grabs</option>
+          <option value="downloads">Meiste Downloads</option>
+          <option value="rate">Beste Erfolgsquote</option>
+          <option value="volume">Meistes Datenvolumen</option>
+          <option value="name">Name A–Z</option>
+        </select>
+      </div>
+    </div>
+    <div class="indexer-summary">
+      <div class="stat"><span>Grabs gesamt</span><strong id="allGrabs">–</strong><small>an SABnzbd übergeben</small></div>
+      <div class="stat"><span>Downloads gesamt</span><strong id="allDownloads">–</strong><small>eindeutige erfolgreiche Grabs</small></div>
+      <div class="stat"><span>Erfolgsquote</span><strong id="allSuccessRate">–</strong><small>Download / Grab</small></div>
+      <div class="stat"><span>Indexer aktiv</span><strong id="activeIndexerCount">–</strong><small>im gewählten Zeitraum</small></div>
+    </div>
+    <div class="indexer-table-wrap">
+      <table class="indexer-table">
+        <thead><tr><th>Indexer</th><th>Grabs</th><th>Downloads</th><th>Erfolg</th><th>Filme</th><th>Serien</th><th>Episoden</th><th>Season Packs</th><th>Datenvolumen</th></tr></thead>
+        <tbody id="indexerTableBody"></tbody>
+      </table>
+    </div>
   </section>
 
   <main id="list"></main>
