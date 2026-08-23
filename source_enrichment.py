@@ -104,7 +104,8 @@ def enhanced_indexer_from_slot(slot):
                     return str(value).strip()
 
     # SAB history exposes URL/url_info and stage_log. When rePollo submits an
-    # NZB by URL, this lets us recover the actual indexer hostname.
+    # NZB by URL, this recovers the actual indexer hostname rather than showing
+    # an invented value.
     candidates = [
         slot.get("url_info"),
         slot.get("nzb_url"),
@@ -171,8 +172,7 @@ def enriched_build_sab_downloads(payload):
     release_indexers = build_release_indexer_map(payload)
 
     for row in rows:
-        # Fix old spelling emitted by server.py while remaining compatible with
-        # existing persistent cache entries.
+        # Fix old spelling emitted by older cache/app versions.
         if str(row.get("source") or "").lower() in {"reppollo", "repollo"}:
             row["source"] = "rePollo"
 
@@ -182,10 +182,33 @@ def enriched_build_sab_downloads(payload):
             if inferred:
                 row["indexer"] = inferred
                 row["indexerSource"] = "Release-Match aus Radarr/Sonarr"
+        elif row.get("arrUrl"):
+            row.setdefault("indexerSource", "Radarr/Sonarr-History")
         else:
-            row.setdefault("indexerSource", "SABnzbd/Download-Historie")
+            row.setdefault("indexerSource", "SABnzbd-Quellmetadaten")
 
     return rows
 
 
 server.build_sab_downloads = enriched_build_sab_downloads
+
+
+# The dashboard UI predates the SAB-first data model. Inject the small extension
+# after app.js so existing layout/theme/filter code stays untouched.
+@server.app.after_request
+def inject_sab_frontend(response):
+    content_type = response.headers.get("Content-Type", "")
+    if "text/html" not in content_type.lower():
+        return response
+
+    try:
+        body = response.get_data(as_text=True)
+        marker = '<script src="/static/sab.js"></script>'
+        if marker not in body and "</body>" in body:
+            body = body.replace("</body>", marker + "\n</body>")
+            response.set_data(body)
+            response.headers["Content-Length"] = str(len(response.get_data()))
+    except Exception:
+        pass
+
+    return response
