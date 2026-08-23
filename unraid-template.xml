@@ -9,7 +9,7 @@
   <Privileged>false</Privileged>
   <Support/>
   <Project>https://github.com/mlo-Tek/usenet-stats</Project>
-  <Overview>Private Read-only Übersicht der letzten Usenet-Imports aus Radarr und Sonarr. Zeigt Filme und Serien getrennt, Original-Release, Indexer, Grab-/Importzeit, Zielordner, Qualität, Release Group und Größe.</Overview>
+  <Overview>Private Read-only Übersicht aller erfolgreichen Usenet-Downloads aus SABnzbd, angereichert mit Radarr-/Sonarr-Daten. Zeigt auch Downloads außerhalb der Arrs, z. B. von RepPollo.</Overview>
   <Category>Tools: Status:Other</Category>
   <WebUI>http://[IP]:[PORT:8780]/</WebUI>
   <Icon>/mnt/cache/appdata/usenet-stats/static/icon.png</Icon>
@@ -18,15 +18,23 @@
   <CPUset/>
 
   <Config Name="WebUI Port" Target="8780" Default="8780" Mode="tcp" Description="Port der Usenet-Stats Weboberfläche." Type="Port" Display="always" Required="true" Mask="false">8780</Config>
-  <Config Name="Appdata / persistenter Cache" Target="/config" Default="/mnt/cache/appdata/usenet-stats" Mode="rw" Description="Persistiert die letzte Statistik über Container-Updates hinweg." Type="Path" Display="always" Required="true" Mask="false">/mnt/cache/appdata/usenet-stats</Config>
+  <Config Name="Appdata / persistenter Cache" Target="/config" Default="/mnt/cache/appdata/usenet-stats" Mode="rw" Description="Persistiert Statistik und Metadaten über Container-Updates hinweg." Type="Path" Display="always" Required="true" Mask="false">/mnt/cache/appdata/usenet-stats</Config>
+
+  <Config Name="SABnzbd URL" Target="SABNZBD_URL" Default="" Mode="" Description="Interne URL zu SABnzbd, z. B. http://10.20.20.x:8080. SABnzbd ist die Primärquelle für alle erfolgreichen Usenet-Downloads." Type="Variable" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="SABnzbd API Key" Target="SABNZBD_API_KEY" Default="" Mode="" Description="SABnzbd API Key aus Config / General." Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="RepPollo Kategorien" Target="REPPOLLO_CATEGORIES" Default="reppollo" Mode="" Description="Kommagetrennte SABnzbd-Kategorien, die als Quelle RepPollo markiert werden." Type="Variable" Display="always" Required="false" Mask="false">reppollo</Config>
+  <Config Name="SAB Path Mapping" Target="SAB_PATH_MAPPINGS" Default="/data/usenet=/mnt/user/data/usenet" Mode="" Description="Übersetzt den SABnzbd-Containerpfad in den Unraid-Hostpfad. Mehrere Mappings mit Semikolon trennen." Type="Variable" Display="always" Required="false" Mask="false">/data/usenet=/mnt/user/data/usenet</Config>
+
   <Config Name="Radarr URL" Target="RADARR_URL" Default="http://10.20.20.9:7878" Mode="" Description="Interne URL zu Radarr." Type="Variable" Display="always" Required="true" Mask="false">http://10.20.20.9:7878</Config>
   <Config Name="Radarr API Key" Target="RADARR_API_KEY" Default="" Mode="" Description="Radarr API Key." Type="Variable" Display="always" Required="true" Mask="true"></Config>
   <Config Name="Sonarr URL" Target="SONARR_URL" Default="http://10.20.20.10:8989" Mode="" Description="Interne URL zu Sonarr." Type="Variable" Display="always" Required="true" Mask="false">http://10.20.20.10:8989</Config>
   <Config Name="Sonarr API Key" Target="SONARR_API_KEY" Default="" Mode="" Description="Sonarr API Key." Type="Variable" Display="always" Required="true" Mask="true"></Config>
   <Config Name="Usenet Download Clients" Target="USENET_CLIENT_NAMES" Default="SABnzbd" Mode="" Description="Kommagetrennte Namen deiner Usenet Download Clients in Radarr/Sonarr." Type="Variable" Display="always" Required="true" Mask="false">SABnzbd</Config>
   <Config Name="Path Mapping" Target="PATH_MAPPINGS" Default="/data/media=/mnt/user/data/media" Mode="" Description="Containerpfad=Unraid-Hostpfad. Mehrere Mappings mit Semikolon trennen." Type="Variable" Display="always" Required="true" Mask="false">/data/media=/mnt/user/data/media</Config>
+
   <Config Name="Auto Refresh" Target="AUTO_REFRESH_SECONDS" Default="900" Mode="" Description="Intervall für automatische Hintergrund-Aktualisierung in Sekunden." Type="Variable" Display="advanced" Required="false" Mask="false">900</Config>
   <Config Name="Cache" Target="CACHE_SECONDS" Default="900" Mode="" Description="Interner Cache in Sekunden." Type="Variable" Display="advanced" Required="false" Mask="false">900</Config>
-  <Config Name="Maximaler Zeitraum" Target="MAX_DAYS" Default="90" Mode="" Description="Maximal von Radarr/Sonarr geladener Zeitraum. 7/30/90 Tage werden im Browser gefiltert." Type="Variable" Display="advanced" Required="false" Mask="false">90</Config>
+  <Config Name="Metadaten Cache" Target="METADATA_CACHE_SECONDS" Default="21600" Mode="" Description="Cachezeit für Sonarr-Episodenmetadaten in Sekunden." Type="Variable" Display="advanced" Required="false" Mask="false">21600</Config>
+  <Config Name="Maximaler Zeitraum" Target="MAX_DAYS" Default="90" Mode="" Description="Maximal von SABnzbd/Radarr/Sonarr geladener Zeitraum. 7/30/90 Tage werden danach lokal gefiltert." Type="Variable" Display="advanced" Required="false" Mask="false">90</Config>
   <Config Name="Timezone" Target="TZ" Default="Europe/Berlin" Mode="" Description="Zeitzone." Type="Variable" Display="advanced" Required="false" Mask="false">Europe/Berlin</Config>
 </Container>
