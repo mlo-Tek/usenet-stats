@@ -6,4 +6,4 @@ COPY . .
 RUN mkdir -p /config
 ENV PORT=8780
 EXPOSE 8780
-CMD ["gunicorn", "--bind", "0.0.0.0:8780", "--workers", "1", "--threads", "6", "--timeout", "120", "server:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8780", "--workers", "1", "--threads", "6", "--timeout", "120", "main:app"]
