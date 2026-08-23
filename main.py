@@ -1,7 +1,8 @@
 import time
 
-import server
+import source_enrichment
 
+server = source_enrichment.server
 app = server.app
 
 _original_build_payload = server.core.build_payload
@@ -26,9 +27,20 @@ def _merge_ledger(previous, fresh):
             ts = 0
         if ts and ts < cutoff:
             continue
+
+        # Normalize old cached spelling while the record is being carried
+        # forward across container updates.
+        if str(item.get("source") or "").lower() in {"reppollo", "repollo"}:
+            item = dict(item)
+            item["source"] = "rePollo"
+
         merged[_ledger_key(item)] = item
 
-    return sorted(merged.values(), key=lambda x: float(x.get("timestamp") or 0), reverse=True)
+    return sorted(
+        merged.values(),
+        key=lambda x: float(x.get("timestamp") or 0),
+        reverse=True,
+    )
 
 
 def build_payload_with_ledger(force=False):
