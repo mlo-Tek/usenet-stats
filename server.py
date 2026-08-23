@@ -18,12 +18,12 @@ AUTO_REFRESH_SECONDS = max(60, int(os.getenv("AUTO_REFRESH_SECONDS", "900")))
 METADATA_CACHE_SECONDS = max(900, int(os.getenv("METADATA_CACHE_SECONDS", "21600")))
 STARTUP_REFRESH_DELAY = max(0, int(os.getenv("STARTUP_REFRESH_DELAY", "2")))
 
-SABNZBD_URL = os.getenv("SABNZBD_URL", "").rstrip("/")
-SABNZBD_API_KEY = os.getenv("SABNZBD_API_KEY", "")
+SABNZBD_URL_ENV = os.getenv("SABNZBD_URL", "").rstrip("/")
+SABNZBD_API_KEY_ENV = os.getenv("SABNZBD_API_KEY", "")
 SAB_HISTORY_PAGE_SIZE = max(50, int(os.getenv("SAB_HISTORY_PAGE_SIZE", "250")))
 REPPOLLO_CATEGORIES = {
     x.strip().lower()
-    for x in os.getenv("REPPOLLO_CATEGORIES", "reppollo").split(",")
+    for x in os.getenv("REPPOLLO_CATEGORIES", "reppollo,reseed").split(",")
     if x.strip()
 }
 
@@ -48,6 +48,12 @@ _state = {
 _metadata_lock = threading.Lock()
 _metadata_cache = {}
 _session = requests.Session()
+_sab_runtime = {
+    "url": SABNZBD_URL_ENV,
+    "apiKey": SABNZBD_API_KEY_ENV,
+    "source": "environment" if SABNZBD_URL_ENV and SABNZBD_API_KEY_ENV else "",
+    "attemptedDiscovery": False,
+}
 
 
 def atomic_json_write(path, payload):
@@ -110,6 +116,73 @@ def pooled_api_get(base, key, endpoint, params=None):
 core.api_get = pooled_api_get
 
 
+def client_field(client, *names):
+    wanted = {x.lower() for x in names}
+    for field in client.get("fields") or []:
+        if str(field.get("name", "")).lower() in wanted:
+            value = field.get("value")
+            if value not in (None, ""):
+                return value
+    return None
+
+
+def discover_sab_from_arr(base, api_key, label):
+    if not base or not api_key:
+        return None
+    clients = pooled_api_get(base, api_key, "downloadclient")
+    if not isinstance(clients, list):
+        return None
+
+    for client in clients:
+        marker = " ".join(
+            str(client.get(k, "")) for k in ("name", "implementation", "implementationName", "configContract")
+        ).lower()
+        if "sabnzbd" not in marker and "sab" not in marker:
+            continue
+
+        host = str(client_field(client, "host") or "").strip()
+        port = client_field(client, "port")
+        api_key_value = str(client_field(client, "apiKey", "apikey") or "").strip()
+        use_ssl = bool(client_field(client, "useSsl", "usesSsl", "ssl") or False)
+        url_base = str(client_field(client, "urlBase", "urlbase") or "").strip()
+
+        if not host or not api_key_value:
+            continue
+
+        scheme = "https" if use_ssl else "http"
+        url = f"{scheme}://{host}"
+        if port:
+            url += f":{port}"
+        if url_base:
+            url += "/" + url_base.strip("/")
+
+        return {"url": url.rstrip("/"), "apiKey": api_key_value, "source": label}
+    return None
+
+
+def resolved_sab_config():
+    if _sab_runtime["url"] and _sab_runtime["apiKey"]:
+        return _sab_runtime["url"], _sab_runtime["apiKey"]
+
+    if _sab_runtime["attemptedDiscovery"]:
+        return "", ""
+
+    _sab_runtime["attemptedDiscovery"] = True
+    for base, key, label in (
+        (core.RADARR_URL, core.RADARR_API_KEY, "Radarr"),
+        (core.SONARR_URL, core.SONARR_API_KEY, "Sonarr"),
+    ):
+        try:
+            found = discover_sab_from_arr(base, key, label)
+        except Exception:
+            found = None
+        if found:
+            _sab_runtime.update(found)
+            return found["url"], found["apiKey"]
+
+    return "", ""
+
+
 def sab_host_path(path):
     if not path:
         return ""
@@ -160,16 +233,17 @@ def indexer_from_slot(slot):
 
 
 def sab_api_history_page(start):
-    if not SABNZBD_URL or not SABNZBD_API_KEY:
+    sab_url, sab_key = resolved_sab_config()
+    if not sab_url or not sab_key:
         return {}
     r = _session.get(
-        f"{SABNZBD_URL}/api",
+        f"{sab_url}/api",
         params={
             "mode": "history",
             "start": start,
             "limit": SAB_HISTORY_PAGE_SIZE,
             "output": "json",
-            "apikey": SABNZBD_API_KEY,
+            "apikey": sab_key,
         },
         timeout=core.REQUEST_TIMEOUT,
     )
@@ -178,7 +252,8 @@ def sab_api_history_page(start):
 
 
 def fetch_sab_history():
-    if not SABNZBD_URL or not SABNZBD_API_KEY:
+    sab_url, sab_key = resolved_sab_config()
+    if not sab_url or not sab_key:
         return []
 
     cutoff = time.time() - core.MAX_DAYS * 86400
@@ -306,7 +381,8 @@ def build_payload_with_sab(force=False):
     payload = _original_build_payload(force=force)
     sab_error = ""
 
-    if SABNZBD_URL and SABNZBD_API_KEY:
+    sab_url, sab_key = resolved_sab_config()
+    if sab_url and sab_key:
         try:
             payload["sabDownloads"] = build_sab_downloads(payload)
         except Exception as exc:
@@ -314,9 +390,11 @@ def build_payload_with_sab(force=False):
             payload["sabDownloads"] = previous.get("sabDownloads", [])
     else:
         payload["sabDownloads"] = previous.get("sabDownloads", [])
+        sab_error = "SABnzbd konnte weder per Umgebungsvariable noch aus Radarr/Sonarr ermittelt werden."
 
-    payload["sabConfigured"] = bool(SABNZBD_URL and SABNZBD_API_KEY)
-    payload["sabUrl"] = SABNZBD_URL
+    payload["sabConfigured"] = bool(sab_url and sab_key)
+    payload["sabUrl"] = sab_url
+    payload["sabConfigSource"] = _sab_runtime.get("source") or ""
     payload["_schemaVersion"] = 3
     core._cache["payload"] = payload
     core._cache["expires"] = time.time() + core.CACHE_SECONDS
@@ -403,7 +481,8 @@ def meta(cold_start=False):
         "loadedFromDisk": snapshot["loadedFromDisk"],
         "lastError": snapshot["lastError"],
         "sabError": snapshot["sabError"],
-        "sabConfigured": bool(SABNZBD_URL and SABNZBD_API_KEY),
+        "sabConfigured": bool(_sab_runtime.get("url") and _sab_runtime.get("apiKey")),
+        "sabConfigSource": _sab_runtime.get("source") or "",
         "cacheAgeSeconds": payload_age(),
         "autoRefreshSeconds": AUTO_REFRESH_SECONDS,
         "coldStart": cold_start,
@@ -421,7 +500,7 @@ def response_payload(payload, cold_start=False):
             "grabs": [],
             "failed": [],
             "sabDownloads": [],
-            "sabConfigured": bool(SABNZBD_URL and SABNZBD_API_KEY),
+            "sabConfigured": False,
         }
     out = dict(payload)
     out["_meta"] = meta(cold_start=cold_start)
@@ -437,7 +516,7 @@ def stats_view():
         return jsonify(response_payload(None, cold_start=True))
 
     age = payload_age(payload)
-    needs_sab_schema = bool(SABNZBD_URL and SABNZBD_API_KEY) and "sabDownloads" not in payload
+    needs_sab_schema = "sabDownloads" not in payload or int(payload.get("_schemaVersion", 0)) < 3
     if force or needs_sab_schema or age is None or age >= AUTO_REFRESH_SECONDS:
         trigger_refresh()
 
@@ -463,9 +542,7 @@ def maintenance_loop():
     while True:
         payload = core._cache.get("payload")
         age = payload_age(payload)
-        needs_sab_schema = bool(SABNZBD_URL and SABNZBD_API_KEY) and (
-            payload is None or "sabDownloads" not in payload
-        )
+        needs_sab_schema = payload is None or "sabDownloads" not in payload or int(payload.get("_schemaVersion", 0)) < 3
         if payload is None or needs_sab_schema or age is None or age >= AUTO_REFRESH_SECONDS:
             trigger_refresh()
         time.sleep(min(60, max(15, AUTO_REFRESH_SECONDS // 4)))
