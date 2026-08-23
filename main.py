@@ -4,8 +4,10 @@ import source_enrichment
 
 server = source_enrichment.server
 app = server.app
+SCHEMA_VERSION = 4
 
 _original_build_payload = server.core.build_payload
+_original_stats_view = app.view_functions["stats"]
 
 
 def _ledger_key(item):
@@ -52,6 +54,7 @@ def build_payload_with_ledger(force=False):
         previous_sab,
         payload.get("sabDownloads") or [],
     )
+    payload["_schemaVersion"] = SCHEMA_VERSION
 
     server.core._cache["payload"] = payload
     server.core._cache["expires"] = time.time() + server.core.CACHE_SECONDS
@@ -59,3 +62,13 @@ def build_payload_with_ledger(force=False):
 
 
 server.core.build_payload = build_payload_with_ledger
+
+
+def stats_view_v4():
+    payload = server.core._cache.get("payload") or {}
+    if int(payload.get("_schemaVersion", 0) or 0) < SCHEMA_VERSION:
+        server.trigger_refresh()
+    return _original_stats_view()
+
+
+app.view_functions["stats"] = stats_view_v4
