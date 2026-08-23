@@ -9,7 +9,7 @@
   <Privileged>false</Privileged>
   <Support/>
   <Project>https://github.com/mlo-Tek/usenet-stats</Project>
-  <Overview>Private Read-only Übersicht aller erfolgreichen Usenet-Downloads aus SABnzbd, angereichert mit Radarr-/Sonarr-Daten. Zeigt auch Downloads außerhalb der Arrs, z. B. von RepPollo.</Overview>
+  <Overview>Private Read-only Übersicht aller erfolgreichen Usenet-Downloads aus SABnzbd, angereichert mit Radarr-/Sonarr-Daten. Zeigt auch Downloads außerhalb der Arrs, z. B. von rePollo.</Overview>
   <Category>Tools: Status:Other</Category>
   <WebUI>http://[IP]:[PORT:8780]/</WebUI>
   <Icon>/mnt/cache/appdata/usenet-stats/static/icon.png</Icon>
@@ -20,9 +20,9 @@
   <Config Name="WebUI Port" Target="8780" Default="8780" Mode="tcp" Description="Port der Usenet-Stats Weboberfläche." Type="Port" Display="always" Required="true" Mask="false">8780</Config>
   <Config Name="Appdata / persistenter Cache" Target="/config" Default="/mnt/cache/appdata/usenet-stats" Mode="rw" Description="Persistiert Statistik und Metadaten über Container-Updates hinweg." Type="Path" Display="always" Required="true" Mask="false">/mnt/cache/appdata/usenet-stats</Config>
 
-  <Config Name="SABnzbd URL" Target="SABNZBD_URL" Default="" Mode="" Description="Interne URL zu SABnzbd, z. B. http://10.20.20.x:8080. SABnzbd ist die Primärquelle für alle erfolgreichen Usenet-Downloads." Type="Variable" Display="always" Required="false" Mask="false"></Config>
-  <Config Name="SABnzbd API Key" Target="SABNZBD_API_KEY" Default="" Mode="" Description="SABnzbd API Key aus Config / General." Type="Variable" Display="always" Required="false" Mask="true"></Config>
-  <Config Name="RepPollo Kategorien" Target="REPPOLLO_CATEGORIES" Default="reppollo" Mode="" Description="Kommagetrennte SABnzbd-Kategorien, die als Quelle RepPollo markiert werden." Type="Variable" Display="always" Required="false" Mask="false">reppollo</Config>
+  <Config Name="SABnzbd URL" Target="SABNZBD_URL" Default="" Mode="" Description="Interne URL zu SABnzbd. Optional: wird ansonsten aus Radarr/Sonarr ermittelt." Type="Variable" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="SABnzbd API Key" Target="SABNZBD_API_KEY" Default="" Mode="" Description="SABnzbd API Key. Optional: wird ansonsten aus Radarr/Sonarr ermittelt." Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="rePollo Kategorien" Target="REPOLLO_CATEGORIES" Default="repollo,reseed" Mode="" Description="Kommagetrennte SABnzbd-Kategorien, die als Quelle rePollo markiert werden. Das alte REPPOLLO_CATEGORIES wird weiterhin unterstützt." Type="Variable" Display="always" Required="false" Mask="false">repollo,reseed</Config>
   <Config Name="SAB Path Mapping" Target="SAB_PATH_MAPPINGS" Default="/data/usenet=/mnt/user/data/usenet" Mode="" Description="Übersetzt den SABnzbd-Containerpfad in den Unraid-Hostpfad. Mehrere Mappings mit Semikolon trennen." Type="Variable" Display="always" Required="false" Mask="false">/data/usenet=/mnt/user/data/usenet</Config>
 
   <Config Name="Radarr URL" Target="RADARR_URL" Default="http://10.20.20.9:7878" Mode="" Description="Interne URL zu Radarr." Type="Variable" Display="always" Required="true" Mask="false">http://10.20.20.9:7878</Config>
