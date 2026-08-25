@@ -9,6 +9,7 @@
   </script>
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/sab.css">
+  <link rel="stylesheet" href="/static/dashboard-v2.css">
 </head>
 <body>
 <div class="shell">
@@ -61,7 +62,8 @@
   </section>
 
   <nav class="tabs">
-    <button class="tab active" data-tab="movies">🎬 Filme <span id="movieTabCount"></span></button>
+    <button class="tab active" data-tab="all">✨ Alle <span id="allTabCount"></span></button>
+    <button class="tab" data-tab="movies">🎬 Filme <span id="movieTabCount"></span></button>
     <button class="tab" data-tab="episodes">📺 Serien <span id="episodeTabCount"></span></button>
     <button class="tab" data-tab="usenet">📦 Alle Usenet <span id="usenetTabCount"></span></button>
     <button class="tab" data-tab="indexers">🌐 Indexer <span id="indexerTabCount"></span></button>
@@ -143,6 +145,7 @@
 <script src="/static/app.js"></script>
 <script src="/static/sab-extension.js"></script>
 <script src="/static/sab.js"></script>
+<script src="/static/all-view.js"></script>
 <script src="/static/indexer-links.js"></script>
 <script src="/static/refresh-status.js"></script>
 </body>
