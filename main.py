@@ -1,10 +1,10 @@
 import time
 
-import source_enrichment
+import indexer_links
 
-server = source_enrichment.server
+server = indexer_links.server
 app = server.app
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 _original_build_payload = server.core.build_payload
 _original_stats_view = app.view_functions["stats"]
@@ -64,11 +64,11 @@ def build_payload_with_ledger(force=False):
 server.core.build_payload = build_payload_with_ledger
 
 
-def stats_view_v4():
+def stats_view_v5():
     payload = server.core._cache.get("payload") or {}
     if int(payload.get("_schemaVersion", 0) or 0) < SCHEMA_VERSION:
         server.trigger_refresh()
     return _original_stats_view()
 
 
-app.view_functions["stats"] = stats_view_v4
+app.view_functions["stats"] = stats_view_v5
