@@ -168,6 +168,65 @@
     baseRenderTab();
   };
 
+  /* ---------- Clickable indexer badges ----------
+   * Every indexer badge on a media card opens the same Radarr/Sonarr detail
+   * page as the title. Event delegation keeps this working after filtering,
+   * tab changes and list re-renders.
+   */
+  function arrLinkForIndexerBadge(badge) {
+    const card = badge?.closest?.(".item");
+    if (!card) return "";
+    const link = card.querySelector('.title-link[href]:not([href="#"])');
+    return link?.href || "";
+  }
+
+  function decorateIndexerBadges(root=document) {
+    root.querySelectorAll?.(".item .badge.indexer").forEach(badge => {
+      const href = arrLinkForIndexerBadge(badge);
+      if (!href) {
+        badge.classList.remove("indexer-arr-link");
+        badge.removeAttribute("role");
+        badge.removeAttribute("tabindex");
+        badge.removeAttribute("title");
+        return;
+      }
+      badge.classList.add("indexer-arr-link");
+      badge.setAttribute("role", "link");
+      badge.setAttribute("tabindex", "0");
+      badge.setAttribute("title", "Film/Serie in Radarr bzw. Sonarr öffnen");
+    });
+  }
+
+  function openIndexerTarget(badge) {
+    const href = arrLinkForIndexerBadge(badge);
+    if (!href) return;
+    window.open(href, "_blank", "noopener,noreferrer");
+  }
+
+  document.addEventListener("click", event => {
+    const badge = event.target.closest?.(".badge.indexer.indexer-arr-link");
+    if (!badge) return;
+    event.preventDefault();
+    event.stopPropagation();
+    openIndexerTarget(badge);
+  });
+
+  document.addEventListener("keydown", event => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const badge = event.target.closest?.(".badge.indexer.indexer-arr-link");
+    if (!badge) return;
+    event.preventDefault();
+    openIndexerTarget(badge);
+  });
+
+  const badgeObserver = new MutationObserver(mutations => {
+    for (const mutation of mutations) {
+      for (const node of mutation.addedNodes) {
+        if (node.nodeType === 1) decorateIndexerBadges(node);
+      }
+    }
+  });
+
   function injectUi() {
     const tabs = document.querySelector(".tabs");
     if (tabs && !document.querySelector('[data-tab="usenet"]')) {
@@ -196,11 +255,18 @@
       .badge.source-repollo{border-color:color-mix(in srgb,var(--purple) 50%,var(--border));color:var(--purple);background:color-mix(in srgb,var(--purple) 10%,transparent)}
       .badge.source-radarr{border-color:color-mix(in srgb,var(--blue) 50%,var(--border));color:var(--blue);background:color-mix(in srgb,var(--blue) 10%,transparent)}
       .badge.source-sonarr{border-color:color-mix(in srgb,var(--teal) 50%,var(--border));color:var(--teal);background:color-mix(in srgb,var(--teal) 10%,transparent)}
+      .badge.indexer.indexer-arr-link{cursor:pointer;transition:transform .14s ease,box-shadow .18s ease,filter .18s ease}
+      .badge.indexer.indexer-arr-link:hover{filter:brightness(1.12);box-shadow:0 0 0 3px color-mix(in srgb,var(--blue) 15%,transparent);transform:translateY(-1px)}
+      .badge.indexer.indexer-arr-link:focus-visible{outline:2px solid var(--blue);outline-offset:3px}
     `;
     document.head.appendChild(style);
 
+    const list = document.getElementById("list");
+    if (list) badgeObserver.observe(list,{childList:true,subtree:true});
+
     populateFilters();
     renderAll();
+    decorateIndexerBadges(document);
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", injectUi);
