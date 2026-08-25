@@ -1,4 +1,4 @@
-/* Clear refresh feedback for the incremental refresh pipeline. */
+/* Clear refresh feedback + lightweight refresh polling. */
 (() => {
   const original = window.renderSyncStatus;
 
@@ -11,7 +11,7 @@
     return ts && (Date.now() / 1000 - ts) < 30;
   }
 
-  window.renderSyncStatus = function(meta = {}, generatedAt = null, source = "server") {
+  renderSyncStatus = function(meta = {}, generatedAt = null, source = "server") {
     const box = document.getElementById("syncStatus");
     const text = document.getElementById("syncText");
     const button = document.getElementById("refresh");
@@ -25,7 +25,7 @@
 
     if (meta.lastError) {
       box.classList.add("error");
-      text.textContent = `Aktualisierung fehlgeschlagen · Cache bleibt aktiv`;
+      text.textContent = "Aktualisierung fehlgeschlagen · Cache bleibt aktiv";
       button.disabled = false;
       button.innerHTML = "↻ Aktualisieren";
       return;
@@ -37,9 +37,6 @@
       const phase = meta.refreshPhase || "Schnellscan läuft";
       text.textContent = `${phase} · ${elapsed} s`;
       button.innerHTML = `<span class="refresh-spinner" aria-hidden="true"></span> Aktualisiere…`;
-
-      // app.js releases the disabled state in its fetch-finally block. Re-apply
-      // it one tick later while the backend explicitly says a refresh is active.
       button.disabled = true;
       setTimeout(() => { if (meta.refreshing) button.disabled = true; }, 0);
       return;
@@ -66,12 +63,40 @@
     }
 
     if (source === "browser") {
-      text.textContent = `Sofortansicht aus Cache`;
+      text.textContent = "Sofortansicht aus Cache";
       return;
     }
 
     box.classList.add("refreshing");
     text.textContent = "Daten werden geladen";
+  };
+
+  /* app.js originally polls /api/stats every 2.5 s while refreshing. That
+   * serializes the complete 90-day dataset repeatedly. Poll only /api/health,
+   * then fetch the full dataset once after the backend is finished. */
+  scheduleRefreshPoll = function() {
+    clearTimeout(REFRESH_POLL);
+    REFRESH_POLL = setTimeout(async () => {
+      try {
+        const hr = await fetch("/api/health", {cache:"no-store"});
+        const health = await hr.json();
+        if (!hr.ok) throw new Error(health.error || `HTTP ${hr.status}`);
+
+        renderSyncStatus(health, health.generatedAt || DATA?.generatedAt || null, "server");
+
+        if (health.refreshing) {
+          scheduleRefreshPoll();
+          return;
+        }
+
+        const r = await fetch("/api/stats", {cache:"no-store"});
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+        await applyServerPayload(j);
+      } catch (_) {
+        scheduleRefreshPoll();
+      }
+    }, 1000);
   };
 
   const style = document.createElement("style");
