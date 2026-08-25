@@ -1,7 +1,7 @@
 import os
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import direct_indexer_links
 
@@ -11,12 +11,12 @@ app = server.app
 
 FAST_REFRESH_SECONDS = max(30, int(os.getenv("FAST_REFRESH_SECONDS", "60")))
 INCREMENTAL_LOOKBACK_HOURS = max(2, int(os.getenv("INCREMENTAL_LOOKBACK_HOURS", "12")))
+INCREMENTAL_OVERLAP_MINUTES = max(5, int(os.getenv("INCREMENTAL_OVERLAP_MINUTES", "30")))
 FULL_REFRESH_SECONDS = max(3600, int(os.getenv("FULL_REFRESH_SECONDS", "86400")))
 FAST_SCHEMA_VERSION = 7
 
-# The existing maintenance thread in server.py reads this global dynamically.
-# Lowering it here turns it into the fast incremental scheduler without adding
-# another competing background loop.
+# server.py already owns one maintenance thread. It reads this global at runtime,
+# so use it as the scheduler for the lightweight incremental refresh.
 server.AUTO_REFRESH_SECONDS = FAST_REFRESH_SECONDS
 
 with server._state_lock:
@@ -54,8 +54,7 @@ def _movie_key(x):
 
 
 def _episode_key(x):
-    # One SAB season pack can create several episode imports with the same
-    # downloadId, so the target file / episode code must participate in the key.
+    # One season pack can create many imports with the same SAB downloadId.
     did = str(x.get("downloadId") or "").strip()
     return f"{did}|{x.get('targetFile') or x.get('episodeCode') or ''}" if did else (
         f"episode:{x.get('seriesId')}:{x.get('episodeCode') or ''}:{x.get('targetFile') or ''}:{x.get('originalRelease') or ''}"
@@ -92,6 +91,18 @@ def _keyset(rows, key_fn):
     return {key_fn(x) for x in (rows or [])}
 
 
+def _incremental_window(previous):
+    """Scan from last successful dataset with overlap, capped at catch-up window."""
+    now = time.time()
+    floor = now - INCREMENTAL_LOOKBACK_HOURS * 3600
+    previous_ts = server.payload_timestamp(previous)
+    if previous_ts:
+        since_epoch = max(floor, previous_ts - INCREMENTAL_OVERLAP_MINUTES * 60)
+    else:
+        since_epoch = floor
+    return datetime.fromtimestamp(since_epoch, timezone.utc), since_epoch, max(0, now - since_epoch)
+
+
 def _recent_sab_history(cutoff):
     sab_url, sab_key = server.resolved_sab_config()
     if not sab_url or not sab_key:
@@ -124,8 +135,8 @@ def _recent_sab_history(cutoff):
 
 
 def _recent_sab_downloads(payload, cutoff):
-    # Reuse the complete SAB enrichment stack (rePollo detection, indexer URL,
-    # Arr matching), but feed it only the recent portion of SAB history.
+    # Reuse all existing SAB enrichment (rePollo, Arr matching, indexer links),
+    # but temporarily feed it only the recent history slice.
     original_fetch = server.fetch_sab_history
     server.fetch_sab_history = lambda: _recent_sab_history(cutoff)
     try:
@@ -145,8 +156,7 @@ def _initial_full_timestamp(previous):
 def fast_refresh():
     previous = core._cache.get("payload") or {}
     now = time.time()
-    since = datetime.now(timezone.utc) - timedelta(hours=INCREMENTAL_LOOKBACK_HOURS)
-    since_epoch = since.timestamp()
+    since, since_epoch, window_seconds = _incremental_window(previous)
 
     old_movies = previous.get("movies") or []
     old_episodes = previous.get("episodes") or []
@@ -196,6 +206,7 @@ def fast_refresh():
     payload["generatedAt"] = datetime.now(timezone.utc).isoformat()
     payload["_lastFastRefreshEpoch"] = now
     payload["_lastFullRefreshEpoch"] = _initial_full_timestamp(previous)
+    payload["_lastIncrementalWindowSeconds"] = round(window_seconds, 1)
     payload["_schemaVersion"] = max(FAST_SCHEMA_VERSION, int(previous.get("_schemaVersion", 0) or 0))
 
     before = {
@@ -220,7 +231,7 @@ def fast_refresh():
     with server._state_lock:
         server._state["sabError"] = sab_error
 
-    return payload, added
+    return payload, added, window_seconds
 
 
 def _full_due(payload):
@@ -250,14 +261,19 @@ def incremental_refresh_worker(force_full=False):
             except Exception:
                 pass
         else:
+            old_age = server.payload_age(previous) or 0
+            catchup_requires_full = old_age > INCREMENTAL_LOOKBACK_HOURS * 3600
+
             with server._state_lock:
-                server._state["refreshPhase"] = f"Schnellscan · letzte {INCREMENTAL_LOOKBACK_HOURS} h"
+                server._state["refreshPhase"] = "Schnellscan · neue History"
 
-            payload, added = fast_refresh()
+            payload, added, window_seconds = fast_refresh()
+            with server._state_lock:
+                server._state["refreshPhase"] = f"Schnellscan · {max(1, round(window_seconds / 60))} Min. geprüft"
 
-            # Publish and persist the fast result before an occasional full
-            # reconciliation. The UI therefore sees new downloads immediately.
-            if force_full or _full_due(payload):
+            # Fast result is already published here. A daily/full catch-up may
+            # continue afterwards without hiding the newly discovered download.
+            if force_full or catchup_requires_full or _full_due(payload):
                 mode = "fast+full"
                 with server._state_lock:
                     server._state["refreshPhase"] = f"Neue Daten sichtbar · Vollabgleich {core.MAX_DAYS} Tage"
@@ -330,6 +346,8 @@ def meta(cold_start=False):
         "fastRefreshSeconds": FAST_REFRESH_SECONDS,
         "fullRefreshSeconds": FULL_REFRESH_SECONDS,
         "incrementalLookbackHours": INCREMENTAL_LOOKBACK_HOURS,
+        "incrementalOverlapMinutes": INCREMENTAL_OVERLAP_MINUTES,
+        "lastIncrementalWindowSeconds": (payload or {}).get("_lastIncrementalWindowSeconds"),
         "lastRefreshDurationSeconds": snapshot.get("lastRefreshDurationSeconds"),
         "lastRefreshMode": snapshot.get("lastRefreshMode") or "",
         "lastRefreshAdded": snapshot.get("lastRefreshAdded") or {},
