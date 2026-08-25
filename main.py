@@ -4,6 +4,7 @@ import direct_indexer_links
 
 server = direct_indexer_links.server
 app = server.app
+app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 SCHEMA_VERSION = 6
 
 _original_build_payload = server.core.build_payload
