@@ -27,7 +27,10 @@ renderSummary = function(){
   const sab = p.sabDownloads || [];
   el("usenetTabCount").textContent = `(${sab.length})`;
 
-  if(DATA?.sabConfigured || sab.length){
+  /* Only replace the Arr-derived total when SAB actually has rows in the
+   * selected period. Otherwise keep the movie/episode fallback instead of
+   * incorrectly showing 0 B. */
+  if(sab.length){
     const total = sab.reduce((s,x)=>s+(x.size||0),0);
     el("totalSize").textContent = bytes(total);
     const top = countBy(sab,"indexer")[0];
@@ -38,13 +41,16 @@ renderSummary = function(){
 renderChart = function(){
   const p=periodData();
   const sab=p.sabDownloads||[];
-  const items=(DATA?.sabConfigured||sab.length)?sab:[...p.movies,...p.episodes];
+  /* Same fallback as the summary: an empty SAB slice must not blank a chart
+   * when matching Arr imports exist for the selected period. */
+  const useSab=sab.length>0;
+  const items=useSab?sab:[...p.movies,...p.episodes];
   const r=rangeBounds(),days=Math.max(1,Math.ceil((r.to-r.from)/86400000)+1),vals={};
   for(let i=0;i<days;i++){const d=new Date(r.from);d.setDate(d.getDate()+i);vals[dayKey(d)]=0}
   for(const x of items){const k=dayKey(x.date);if(k in vals)vals[k]+=METRIC==="bytes"?(x.size||0):1}
   const max=Math.max(1,...Object.values(vals));
   el("chartTitle").textContent=METRIC==="bytes"?"Datenvolumen pro Tag":"Downloads pro Tag";
-  el("chartSubtitle").textContent=(DATA?.sabConfigured||sab.length)
+  el("chartSubtitle").textContent=useSab
     ? (METRIC==="bytes"?"Erfolgreich von SABnzbd geladenes Datenvolumen":"Alle erfolgreichen SABnzbd-Downloads")
     : (METRIC==="bytes"?"Importiertes Datenvolumen im gewählten Zeitraum":"Importierte Dateien im gewählten Zeitraum");
   el("chart").innerHTML=Object.entries(vals).map(([d,n])=>{
