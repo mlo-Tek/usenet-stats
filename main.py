@@ -1,11 +1,11 @@
 import time
 
-import direct_indexer_links
+import incremental_refresh
 
-server = direct_indexer_links.server
+server = incremental_refresh.server
 app = server.app
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 _original_build_payload = server.core.build_payload
 _original_stats_view = app.view_functions["stats"]
@@ -62,11 +62,11 @@ def build_payload_with_ledger(force=False):
 server.core.build_payload = build_payload_with_ledger
 
 
-def stats_view_v6():
+def stats_view_v7():
     payload = server.core._cache.get("payload") or {}
     if int(payload.get("_schemaVersion", 0) or 0) < SCHEMA_VERSION:
-        server.trigger_refresh()
+        server.trigger_refresh(force_full=False)
     return _original_stats_view()
 
 
-app.view_functions["stats"] = stats_view_v6
+app.view_functions["stats"] = stats_view_v7
