@@ -1,10 +1,10 @@
 import time
 
-import indexer_links
+import direct_indexer_links
 
-server = indexer_links.server
+server = direct_indexer_links.server
 app = server.app
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 _original_build_payload = server.core.build_payload
 _original_stats_view = app.view_functions["stats"]
@@ -21,7 +21,6 @@ def _merge_ledger(previous, fresh):
     cutoff = time.time() - server.core.MAX_DAYS * 86400
     merged = {}
 
-    # Old data first, fresh SAB history second so current metadata wins.
     for item in [*(previous or []), *(fresh or [])]:
         try:
             ts = float(item.get("timestamp") or 0)
@@ -30,8 +29,6 @@ def _merge_ledger(previous, fresh):
         if ts and ts < cutoff:
             continue
 
-        # Normalize old cached spelling while the record is being carried
-        # forward across container updates.
         if str(item.get("source") or "").lower() in {"reppollo", "repollo"}:
             item = dict(item)
             item["source"] = "rePollo"
@@ -64,11 +61,11 @@ def build_payload_with_ledger(force=False):
 server.core.build_payload = build_payload_with_ledger
 
 
-def stats_view_v5():
+def stats_view_v6():
     payload = server.core._cache.get("payload") or {}
     if int(payload.get("_schemaVersion", 0) or 0) < SCHEMA_VERSION:
         server.trigger_refresh()
     return _original_stats_view()
 
 
-app.view_functions["stats"] = stats_view_v5
+app.view_functions["stats"] = stats_view_v6
