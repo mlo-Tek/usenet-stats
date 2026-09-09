@@ -11,6 +11,11 @@
     return ts && (Date.now() / 1000 - ts) < 30;
   }
 
+  function shortMessage(value, max = 95) {
+    const text = String(value || "").replace(/\s+/g, " ").trim();
+    return text.length > max ? text.slice(0, max - 1) + "…" : text;
+  }
+
   renderSyncStatus = function(meta = {}, generatedAt = null, source = "server") {
     const box = document.getElementById("syncStatus");
     const text = document.getElementById("syncText");
@@ -21,11 +26,14 @@
       return;
     }
 
-    box.classList.remove("refreshing", "error");
+    box.classList.remove("refreshing", "error", "warning");
+    box.removeAttribute("title");
 
     if (meta.lastError) {
       box.classList.add("error");
-      text.textContent = "Aktualisierung fehlgeschlagen · Cache bleibt aktiv";
+      const detail = shortMessage(meta.lastError);
+      text.textContent = detail ? `Aktualisierung fehlgeschlagen · ${detail}` : "Aktualisierung fehlgeschlagen · Cache bleibt aktiv";
+      box.title = String(meta.lastError || "");
       button.disabled = false;
       button.innerHTML = "↻ Aktualisieren";
       return;
@@ -44,6 +52,17 @@
 
     button.disabled = false;
     button.innerHTML = "↻ Aktualisieren";
+
+    const warnings = Array.isArray(meta.refreshWarnings) ? meta.refreshWarnings.filter(Boolean) : [];
+    if (warnings.length) {
+      box.classList.add("warning");
+      const first = shortMessage(warnings[0], 78);
+      text.textContent = warnings.length === 1
+        ? `Teilweise aktualisiert · ${first}`
+        : `Teilweise aktualisiert · ${warnings.length} Quellen mit Warnung`;
+      box.title = warnings.join("\n");
+      return;
+    }
 
     if (recentFinished(meta)) {
       const duration = Number(meta.lastRefreshDurationSeconds || 0);
@@ -71,9 +90,6 @@
     text.textContent = "Daten werden geladen";
   };
 
-  /* app.js originally polls /api/stats every 2.5 s while refreshing. That
-   * serializes the complete 90-day dataset repeatedly. Poll only /api/health,
-   * then fetch the full dataset once after the backend is finished. */
   scheduleRefreshPoll = function() {
     clearTimeout(REFRESH_POLL);
     REFRESH_POLL = setTimeout(async () => {
@@ -112,6 +128,8 @@
       border-radius:50%;
       animation:usenetSpin .7s linear infinite;
     }
+    .sync-status.warning{color:var(--orange)}
+    .sync-status.warning .sync-dot{background:var(--orange)}
     #refresh:disabled{cursor:progress;opacity:.82}
     @keyframes usenetSpin{to{transform:rotate(360deg)}}
   `;
