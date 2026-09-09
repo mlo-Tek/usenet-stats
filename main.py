@@ -1,8 +1,8 @@
 import time
 
-import incremental_refresh
+import refresh_resilience
 
-server = incremental_refresh.server
+server = refresh_resilience.server
 app = server.app
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 SCHEMA_VERSION = 7
