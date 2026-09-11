@@ -16,6 +16,12 @@
   let previous = null;
   let next = null;
 
+  function scrollToListStart() {
+    requestAnimationFrame(() => {
+      el("list")?.scrollIntoView({behavior:"smooth", block:"start"});
+    });
+  }
+
   function ensureControls() {
     if (controls) return;
 
@@ -41,7 +47,7 @@
       if (currentPage <= 0) return;
       currentPage -= 1;
       applyPage(false);
-      controls.scrollIntoView({behavior:"smooth", block:"nearest"});
+      scrollToListStart();
     });
 
     next.addEventListener("click", () => {
@@ -49,7 +55,7 @@
       if (currentPage >= pageCount - 1) return;
       currentPage += 1;
       applyPage(false);
-      controls.scrollIntoView({behavior:"smooth", block:"nearest"});
+      scrollToListStart();
     });
   }
 
