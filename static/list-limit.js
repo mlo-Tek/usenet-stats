@@ -1,22 +1,20 @@
-/* Result list limiter.
- * Keeps stats, chart and tab counters based on the full selected period while
- * only a compact slice of result cards stays visible in the DOM.
+/* Fixed result pagination.
+ * Stats, chart and tab counters continue to use the complete selected period.
+ * Only the result-card DOM is paginated and never shows more than 50 rows.
  */
 (() => {
-  const DEFAULT_LIMIT = 50;
-  const LOAD_STEP = 50;
-  const OPTIONS = [25, 50, 100, "all"];
+  const PAGE_SIZE = 50;
 
-  let selectedLimit = DEFAULT_LIMIT;
-  let visibleCount = DEFAULT_LIMIT;
-  let storedNodes = [];
+  let currentPage = 0;
+  let allNodes = [];
   let applying = false;
   let scheduled = false;
+  let captureScheduled = false;
   let ignoreOwnMutation = false;
   let controls = null;
   let summary = null;
-  let select = null;
-  let more = null;
+  let previous = null;
+  let next = null;
 
   function ensureControls() {
     if (controls) return;
@@ -28,57 +26,40 @@
     controls.innerHTML = `
       <div class="list-limit-summary" id="listLimitSummary"></div>
       <div class="list-limit-actions">
-        <label class="list-limit-select">Sichtbar
-          <select id="listLimitSelect" aria-label="Sichtbare Einträge">
-            ${OPTIONS.map(value => {
-              const label = value === "all" ? "Alle" : String(value);
-              const selected = value === DEFAULT_LIMIT ? " selected" : "";
-              return `<option value="${value}"${selected}>${label}</option>`;
-            }).join("")}
-          </select>
-        </label>
-        <button id="listLimitMore" type="button">Weitere 50 laden</button>
+        <button id="listPagePrevious" type="button">← Vorherige 50</button>
+        <button id="listPageNext" type="button">Nächste 50 →</button>
       </div>
     `;
 
     const list = el("list");
-    list.parentNode.insertBefore(controls, list);
+    list.parentNode.insertBefore(controls, list.nextSibling);
     summary = el("listLimitSummary");
-    select = el("listLimitSelect");
-    more = el("listLimitMore");
+    previous = el("listPagePrevious");
+    next = el("listPageNext");
 
-    select.addEventListener("change", () => {
-      selectedLimit = select.value === "all" ? "all" : Number(select.value);
-      visibleCount = selectedLimit === "all" ? Number.MAX_SAFE_INTEGER : selectedLimit;
-      applyLimit();
+    previous.addEventListener("click", () => {
+      if (currentPage <= 0) return;
+      currentPage -= 1;
+      applyPage(false);
+      controls.scrollIntoView({behavior:"smooth", block:"nearest"});
     });
 
-    more.addEventListener("click", () => {
-      visibleCount += LOAD_STEP;
-      applyLimit();
+    next.addEventListener("click", () => {
+      const pageCount = Math.max(1, Math.ceil(allNodes.length / PAGE_SIZE));
+      if (currentPage >= pageCount - 1) return;
+      currentPage += 1;
+      applyPage(false);
+      controls.scrollIntoView({behavior:"smooth", block:"nearest"});
     });
   }
 
-  function currentLimit() {
-    return selectedLimit === "all" ? Number.MAX_SAFE_INTEGER : visibleCount;
+  function visibleItemNodes() {
+    return [...el("list").children].filter(node => node.classList?.contains("item"));
   }
 
-  function restoreNodes() {
-    if (!storedNodes.length) return;
-    const list = el("list");
-    const fragment = document.createDocumentFragment();
-    for (const node of storedNodes) fragment.appendChild(node);
-    storedNodes = [];
-    list.appendChild(fragment);
-  }
-
-  function syncSelect() {
-    if (!select) return;
-    select.value = selectedLimit === "all" ? "all" : String(selectedLimit);
-  }
-
-  function applyLimit() {
+  function applyPage(capture = true) {
     ensureControls();
+
     if (TAB === "indexers" || el("list").hidden) {
       controls.hidden = true;
       return;
@@ -86,43 +67,53 @@
 
     applying = true;
     ignoreOwnMutation = true;
-    restoreNodes();
 
     const list = el("list");
-    const nodes = [...list.children].filter(node => node.classList?.contains("item"));
-    const total = nodes.length;
-    const limit = currentLimit();
-    const shown = Math.min(total, limit);
+    if (capture) allNodes = visibleItemNodes();
 
-    storedNodes = nodes.slice(shown);
-    for (const node of storedNodes) node.remove();
+    const total = allNodes.length;
+    const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    currentPage = Math.min(Math.max(0, currentPage), pageCount - 1);
+
+    for (const node of visibleItemNodes()) node.remove();
+
+    const start = currentPage * PAGE_SIZE;
+    const end = Math.min(start + PAGE_SIZE, total);
+    const fragment = document.createDocumentFragment();
+    for (const node of allNodes.slice(start, end)) fragment.appendChild(node);
+    list.appendChild(fragment);
 
     controls.hidden = total === 0;
-    summary.textContent = total === 1
-      ? "1 Eintrag sichtbar"
-      : `${shown} von ${total} Einträgen sichtbar`;
-    more.hidden = shown >= total || selectedLimit === "all";
-    syncSelect();
+    if (total > 0) {
+      summary.textContent = `${start + 1}–${end} von ${total} Einträgen · Seite ${currentPage + 1} von ${pageCount}`;
+    } else {
+      summary.textContent = "";
+    }
+
+    previous.hidden = currentPage === 0;
+    next.hidden = currentPage >= pageCount - 1;
 
     applying = false;
     queueMicrotask(() => { ignoreOwnMutation = false; });
   }
 
-  function scheduleLimit() {
-    if (applying || scheduled) return;
+  function schedulePage(capture = true) {
+    if (applying) return;
+    captureScheduled = captureScheduled || capture;
+    if (scheduled) return;
+
     scheduled = true;
     requestAnimationFrame(() => {
       scheduled = false;
-      applyLimit();
+      const shouldCapture = captureScheduled;
+      captureScheduled = false;
+      applyPage(shouldCapture);
     });
   }
 
-  function resetListLimit() {
-    selectedLimit = DEFAULT_LIMIT;
-    visibleCount = DEFAULT_LIMIT;
-    storedNodes = [];
-    syncSelect();
-    scheduleLimit();
+  function resetPagination() {
+    currentPage = 0;
+    schedulePage(true);
   }
 
   function patchRender(name) {
@@ -130,28 +121,28 @@
     if (typeof original !== "function") return;
     window[name] = function(...args) {
       const result = original.apply(this, args);
-      scheduleLimit();
+      schedulePage(true);
       return result;
     };
   }
 
   function bindResetEvents() {
     document.querySelectorAll(".tab").forEach(tab => {
-      tab.addEventListener("click", resetListLimit);
+      tab.addEventListener("click", resetPagination);
     });
 
     ["days", "search", "source", "indexer", "quality", "group", "client", "library", "seriesType", "upgrade", "sort", "groupSeries"].forEach(id => {
       const node = el(id);
-      node?.addEventListener("input", resetListLimit);
-      node?.addEventListener("change", resetListLimit);
+      node?.addEventListener("input", resetPagination);
+      node?.addEventListener("change", resetPagination);
     });
 
     document.querySelectorAll(".quick").forEach(button => {
-      button.addEventListener("click", resetListLimit);
+      button.addEventListener("click", resetPagination);
     });
 
     ["applyDates", "clearFilters", "preset4k"].forEach(id => {
-      el(id)?.addEventListener("click", resetListLimit);
+      el(id)?.addEventListener("click", resetPagination);
     });
   }
 
@@ -164,11 +155,11 @@
 
     const observer = new MutationObserver(() => {
       if (ignoreOwnMutation) return;
-      scheduleLimit();
+      schedulePage(true);
     });
     observer.observe(el("list"), {childList: true});
 
-    resetListLimit();
+    resetPagination();
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
