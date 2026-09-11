@@ -53,6 +53,10 @@
     return `${item.seriesId ?? item.title}::${Number(item.seasonNumber)}`;
   }
 
+  function rowTimestamp(item) {
+    return Number(item.importTimestamp || item.timestamp || 0) || 0;
+  }
+
   function foldCompleteSeasons(items) {
     const groups = new Map();
     const untouched = [];
@@ -78,27 +82,34 @@
 
     const folded = [...untouched];
     for (const group of groups.values()) {
-      const expected = Number(group[0].seasonEpisodeCount);
+      /* Sonarr history can contain more than one import row for the same E##
+       * (retry, rename, re-import or upgrade). That must not prevent a complete
+       * current season from folding. Use the newest relevant row per episode,
+       * then validate the resulting E01..E## set as one coherent release set. */
       const byEpisode = new Map();
-      let duplicate = false;
       for (const item of group) {
         const number = Number(item.episodeNumber);
-        if (byEpisode.has(number)) duplicate = true;
-        byEpisode.set(number, item);
+        const existing = byEpisode.get(number);
+        if (!existing || rowTimestamp(item) >= rowTimestamp(existing)) {
+          byEpisode.set(number, item);
+        }
       }
 
+      const selected = [...byEpisode.values()];
+      const expectedValues = new Set(selected.map(x => Number(x.seasonEpisodeCount)).filter(Number.isInteger));
+      const expected = expectedValues.size === 1 ? [...expectedValues][0] : 0;
       const numbers = [...byEpisode.keys()].sort((a,b)=>a-b);
-      const complete = !duplicate && numbers.length === expected && numbers.every((n, i) => n === i + 1);
-      const fingerprints = new Set(group.map(technicalFingerprint));
+      const complete = expected > 0 && numbers.length === expected && numbers.every((n, i) => n === i + 1);
+      const fingerprints = new Set(selected.map(technicalFingerprint));
 
       if (!complete || fingerprints.size !== 1) {
         folded.push(...group);
         continue;
       }
 
-      const children = [...group].sort((a,b)=>Number(a.episodeNumber)-Number(b.episodeNumber));
-      const newest = [...group].sort((a,b)=>(b.timestamp||0)-(a.timestamp||0))[0];
-      const totalSize = group.reduce((sum,item)=>sum+(Number(item.size)||0),0);
+      const children = [...selected].sort((a,b)=>Number(a.episodeNumber)-Number(b.episodeNumber));
+      const newest = [...selected].sort((a,b)=>rowTimestamp(b)-rowTimestamp(a))[0];
+      const totalSize = selected.reduce((sum,item)=>sum+(Number(item.size)||0),0);
       const season = Number(newest.seasonNumber);
       folded.push({
         ...newest,
