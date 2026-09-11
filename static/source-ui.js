@@ -6,6 +6,7 @@
   function canonicalSource(value, item = null) {
     const normalized = String(value || "").trim().toLowerCase();
     if (normalized === "repollo" || normalized === "reppollo") return "rePollo";
+    if (normalized === "kryo" || normalized === "kryo manager" || normalized === "kryo-manager") return "Kryo Manager";
     if (normalized === "radarr") return "Radarr";
     if (normalized === "sonarr") return "Sonarr";
     if (normalized === "sabnzbd" || normalized === "sab") return "SABnzbd";
@@ -21,6 +22,7 @@
   function sourceClassName(value) {
     const source = canonicalSource(value);
     if (source === "rePollo") return "source-reppollo";
+    if (source === "Kryo Manager") return "source-kryo";
     if (source === "Radarr") return "source-radarr";
     if (source === "Sonarr") return "source-sonarr";
     return "source-sab";
@@ -40,11 +42,12 @@
       ...(DATA?.sabDownloads || []),
     ];
     const sources = all.map(effectiveDownloadSource);
-    /* Keep all four expected choices available even when one source has no
-     * rows in the current cache yet. */
+    /* Keep all expected choices available even when one source has no rows in
+     * the current cache yet. This also makes the selector usable before SAB
+     * enrichment has produced its first rows. */
     populateSelect(
       "source",
-      ["Radarr", "Sonarr", "rePollo", "SABnzbd", ...sources],
+      ["Radarr", "Sonarr", "Kryo Manager", "rePollo", "SABnzbd", ...sources],
       "Alle Quellen"
     );
   };
@@ -52,8 +55,9 @@
   const baseFilteredOriginal = baseFiltered;
   baseFiltered = function(items) {
     const filtered = baseFilteredOriginal(items);
-    const wanted = canonicalSource(el("source")?.value || "");
-    if (!el("source")?.value) return filtered;
+    const rawWanted = el("source")?.value || "";
+    if (!rawWanted) return filtered;
+    const wanted = canonicalSource(rawWanted);
     return filtered.filter(item => effectiveDownloadSource(item) === wanted);
   };
 
