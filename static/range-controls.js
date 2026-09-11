@@ -70,7 +70,7 @@
   document.getElementById("clearFilters")?.addEventListener("click", () => {
     clearQuickVisuals();
     quickOption.hidden = true;
-    days.value = "30";
+    days.value = "7";
     CUSTOM_RANGE = null;
     renderAll();
   });
