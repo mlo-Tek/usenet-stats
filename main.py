@@ -1,11 +1,12 @@
 import time
+from collections import defaultdict
 
 import refresh_resilience
 
 server = refresh_resilience.server
 app = server.app
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 _original_build_payload = server.core.build_payload
 _original_stats_view = app.view_functions["stats"]
@@ -44,11 +45,12 @@ def _merge_ledger(previous, fresh):
 
 
 def _enrich_season_episode_counts(payload):
-    """Attach Sonarr's expected regular-episode count to every episode row.
+    """Attach Sonarr's actual regular-episode count to every episode row.
 
-    The frontend uses this to fold individual downloads only when they actually
-    represent a complete season. One Sonarr series request is enough because
-    season statistics are already included in the series payload.
+    Count Sonarr's episode objects directly instead of relying on optional season
+    statistics. Specials (season 0) and non-positive episode numbers are ignored.
+    This makes complete-season folding deterministic for individually downloaded
+    episodes while preventing partial seasons from collapsing.
     """
     rows = payload.get("episodes") or []
     if not rows or not server.core.SONARR_API_KEY:
@@ -58,42 +60,40 @@ def _enrich_season_episode_counts(payload):
     if not wanted_series:
         return
 
-    try:
-        series_list = server.core.api_get(
-            server.core.SONARR_URL,
-            server.core.SONARR_API_KEY,
-            "series",
-        )
-    except Exception:
-        return
-
-    counts = {}
-    for series in series_list or []:
-        series_id = series.get("id")
-        if series_id not in wanted_series:
+    counts = defaultdict(int)
+    for series_id in wanted_series:
+        try:
+            episodes = server.core.api_get(
+                server.core.SONARR_URL,
+                server.core.SONARR_API_KEY,
+                "episode",
+                {"seriesId": series_id},
+            )
+        except Exception:
             continue
-        for season in series.get("seasons") or []:
-            season_number = season.get("seasonNumber")
-            if season_number is None or int(season_number or 0) <= 0:
-                continue
-            stats = season.get("statistics") or {}
-            expected = stats.get("totalEpisodeCount")
-            if expected in (None, 0, "0"):
-                expected = stats.get("episodeCount")
+
+        seen = set()
+        for episode in episodes or []:
             try:
-                expected = int(expected or 0)
+                season_number = int(episode.get("seasonNumber"))
+                episode_number = int(episode.get("episodeNumber"))
             except (TypeError, ValueError):
-                expected = 0
-            if expected > 0:
-                counts[(series_id, int(season_number))] = expected
+                continue
+            if season_number <= 0 or episode_number <= 0:
+                continue
+            key = (series_id, season_number, episode_number)
+            if key in seen:
+                continue
+            seen.add(key)
+            counts[(series_id, season_number)] += 1
 
     for row in rows:
         try:
             key = (row.get("seriesId"), int(row.get("seasonNumber")))
         except (TypeError, ValueError):
             continue
-        expected = counts.get(key)
-        if expected:
+        expected = counts.get(key, 0)
+        if expected > 0:
             row["seasonEpisodeCount"] = expected
 
 
@@ -117,11 +117,11 @@ def build_payload_with_ledger(force=False):
 server.core.build_payload = build_payload_with_ledger
 
 
-def stats_view_v8():
+def stats_view_v9():
     payload = server.core._cache.get("payload") or {}
     if int(payload.get("_schemaVersion", 0) or 0) < SCHEMA_VERSION:
         server.trigger_refresh(force_full=False)
     return _original_stats_view()
 
 
-app.view_functions["stats"] = stats_view_v8
+app.view_functions["stats"] = stats_view_v9
