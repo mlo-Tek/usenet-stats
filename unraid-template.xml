@@ -12,7 +12,7 @@
   <Overview>Private Read-only Übersicht aller erfolgreichen Usenet-Downloads aus SABnzbd, angereichert mit Radarr-/Sonarr-Daten. Zeigt auch Downloads außerhalb der Arrs, z. B. von rePollo.</Overview>
   <Category>Tools: Status:Other</Category>
   <WebUI>http://[IP]:[PORT:8780]/</WebUI>
-  <Icon>https://raw.githubusercontent.com/mlo-Tek/SceneNFO/main/assets/container-icons/usenet-stats.png</Icon>
+  <Icon>https://raw.githubusercontent.com/mlo-Tek/usenet-stats/main/assets/usenet-stats.png</Icon>
   <ExtraParams/>
   <PostArgs/>
   <CPUset/>
