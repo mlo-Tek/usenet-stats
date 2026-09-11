@@ -1,7 +1,6 @@
 import os
 import re
 import time
-from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 import requests
@@ -9,131 +8,75 @@ from flask import Flask, jsonify, render_template, request
 
 app = Flask(__name__)
 
-RADARR_URL = os.getenv("RADARR_URL", "").rstrip("/")
+RADARR_URL = os.getenv("RADARR_URL", "http://10.20.20.9:7878").rstrip("/")
 RADARR_API_KEY = os.getenv("RADARR_API_KEY", "")
-SONARR_URL = os.getenv("SONARR_URL", "").rstrip("/")
+SONARR_URL = os.getenv("SONARR_URL", "http://10.20.20.10:8989").rstrip("/")
 SONARR_API_KEY = os.getenv("SONARR_API_KEY", "")
+USENET_CLIENT_NAMES = [x.strip().lower() for x in os.getenv("USENET_CLIENT_NAMES", "SABnzbd,SAB,NZBGet").split(",") if x.strip()]
+PATH_MAPPINGS = []
+for mapping in os.getenv("PATH_MAPPINGS", "/data/media=/mnt/user/data/media").split(";"):
+    if "=" in mapping:
+        src, dst = mapping.split("=", 1)
+        PATH_MAPPINGS.append((src.rstrip("/"), dst.rstrip("/")))
+CACHE_SECONDS = int(os.getenv("CACHE_SECONDS", "900"))
+REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "20"))
 MAX_DAYS = int(os.getenv("MAX_DAYS", "90"))
-CACHE_SECONDS = int(os.getenv("CACHE_SECONDS", "300"))
-
-_cache = {"payload": None, "expires": 0}
+_cache = {"expires": 0, "payload": None}
 
 
 def api_get(base, key, endpoint, params=None):
-    r = requests.get(
-        f"{base}/api/v3/{endpoint}",
-        params=params or {},
-        headers={"X-Api-Key": key},
-        timeout=30,
-    )
+    r = requests.get(f"{base}/api/v3/{endpoint.lstrip('/')}", headers={"X-Api-Key": key}, params=params, timeout=REQUEST_TIMEOUT)
     r.raise_for_status()
     return r.json()
+
+
+def host_path(path):
+    if not path:
+        return ""
+    for src, dst in PATH_MAPPINGS:
+        if path == src or path.startswith(src + "/"):
+            return dst + path[len(src):]
+    return path
 
 
 def parse_dt(value):
     if not value:
         return None
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
     except Exception:
         return None
 
 
-def human_size(size):
-    size = int(size or 0)
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if size < 1024 or unit == "TB":
-            return f"{size:.1f} {unit}" if unit != "B" else f"{size} B"
-        size /= 1024
-
-
-def host_path(path):
-    if not path:
-        return ""
-    mappings = [
-        (os.getenv("MEDIA_CONTAINER_PREFIX", "/data/media"), os.getenv("MEDIA_HOST_PREFIX", "/mnt/user/data/media")),
-    ]
-    for src, dst in mappings:
-        if src and path.startswith(src):
-            return dst.rstrip("/") + path[len(src):]
-    return path
-
-
-def poster_of(entity):
-    images = entity.get("images") or []
-    for image in images:
-        if image.get("coverType") == "poster":
-            return image.get("remoteUrl") or image.get("url") or ""
+def quality_label(record):
+    q = record.get("quality") or {}
+    if isinstance(q, dict):
+        quality = q.get("quality") or {}
+        if isinstance(quality, dict) and quality.get("name"):
+            return quality["name"]
+        if q.get("name"):
+            return q["name"]
     return ""
 
 
-def source_title(rec):
-    data = rec.get("data") or {}
-    return data.get("sourceTitle") or rec.get("sourceTitle") or data.get("downloadClientName") or ""
-
-
-def get_download_id(rec):
-    data = rec.get("data") or {}
-    return data.get("downloadId") or rec.get("downloadId") or ""
-
-
-def get_indexer(rec):
-    data = rec.get("data") or {}
-    return data.get("indexer") or data.get("indexerName") or rec.get("indexer") or ""
-
-
-def download_client(rec):
-    data = rec.get("data") or {}
-    return data.get("downloadClient") or data.get("downloadClientName") or rec.get("downloadClient") or ""
-
-
-def quality_label(rec):
-    quality = rec.get("quality") or {}
-    if isinstance(quality, dict):
-        q = quality.get("quality") or quality
-        if isinstance(q, dict):
-            return q.get("name") or ""
-        if isinstance(q, str):
-            return q
-    data = rec.get("data") or {}
-    return data.get("quality") or ""
-
-
-def release_group_from_name(name):
-    if not name:
-        return ""
-    match = re.search(r"-([A-Za-z0-9._]+)$", name)
-    return match.group(1) if match else ""
-
-
-def episode_release_type(name):
-    text = str(name or "")
-    if re.search(r"S\d{1,2}(?!E\d)", text, re.I) or re.search(r"Season[ ._-]?\d+", text, re.I):
-        return "season_pack"
-    return "episode"
-
-
-def library_from_path(path):
-    p = str(path or "").lower()
-    for name in ("movies-kids", "movies-adult", "tv-kids", "stand-up-comedy", "movies", "tv"):
-        if f"/{name}" in p:
-            return name
-    return ""
-
-
-def is_usenet(rec):
-    data = rec.get("data") or {}
-    proto = str(data.get("protocol") or rec.get("protocol") or "").lower()
-    client = str(download_client(rec)).lower()
-    return proto == "usenet" or "sab" in client
+def is_usenet(record):
+    data = record.get("data") or {}
+    if data.get("nzbInfoUrl") or data.get("nzbInfoUrlBase"):
+        return True
+    if data.get("torrentInfoHash") or data.get("torrentInfoHashV2"):
+        return False
+    vals = [str(data.get(k, "")).lower() for k in ("downloadClient", "downloadClientName", "downloadClientType", "indexer", "protocol")]
+    joined = " ".join(vals)
+    if any(x in joined for x in ("torrent", "qbittorrent", "transmission")):
+        return False
+    return "usenet" in joined or "nzb" in joined or any(name in joined for name in USENET_CLIENT_NAMES)
 
 
 def history_since(base, key, since):
-    rows = []
-    page = 1
+    page, page_size, out = 1, 1000, []
     while True:
-        payload = api_get(base, key, "history", {"page": page, "pageSize": 250, "sortKey": "date", "sortDirection": "descending"})
-        records = payload.get("records") or []
+        payload = api_get(base, key, "history", {"page": page, "pageSize": page_size, "sortKey": "date", "sortDirection": "descending"})
+        records = payload.get("records", payload if isinstance(payload, list) else [])
         if not records:
             break
         stop = False
@@ -142,36 +85,93 @@ def history_since(base, key, since):
             if dt and dt < since:
                 stop = True
                 break
-            rows.append(rec)
-        if stop or len(records) < 250:
+            out.append(rec)
+        if stop or len(records) < page_size:
             break
         page += 1
-    return rows
+    return out
+
+
+def release_group_from_name(name):
+    m = re.search(r"-([A-Za-z0-9][A-Za-z0-9._]{1,40})$", name or "")
+    return m.group(1) if m else ""
+
+
+def human_size(num):
+    n = float(num or 0)
+    if n <= 0:
+        return ""
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if n < 1024 or unit == "TB":
+            return f"{n:.1f} {unit}" if unit != "B" else f"{int(n)} B"
+        n /= 1024
+
+
+def get_download_id(rec):
+    data = rec.get("data") or {}
+    return rec.get("downloadId") or data.get("downloadId") or data.get("downloadClientId") or ""
+
+
+def get_indexer(rec):
+    data = rec.get("data") or {}
+    val = data.get("indexer") or data.get("indexerName") or ""
+    return val if isinstance(val, str) else str(val or "")
+
+
+def source_title(rec):
+    data = rec.get("data") or {}
+    return rec.get("sourceTitle") or data.get("sourceTitle") or data.get("droppedPath") or ""
+
+
+def download_client(rec):
+    data = rec.get("data") or {}
+    return data.get("downloadClient") or data.get("downloadClientName") or ""
+
+
+def poster_of(entity):
+    for img in entity.get("images") or []:
+        if img.get("coverType") == "poster":
+            return img.get("remoteUrl") or img.get("url") or ""
+    return ""
+
+
+def library_from_path(path):
+    p = host_path(path).lower()
+    for token, label in (("/movies-kids/", "Movies Kids"), ("/movies-adult/", "Movies Adult"), ("/stand-up-comedy/", "Stand-up"), ("/movies/", "Movies"), ("/tv-kids/", "TV Kids"), ("/tv/", "TV")):
+        if token in p:
+            return label
+    return "Other"
+
+
+def episode_release_type(source):
+    s = source or ""
+    if re.search(r"(?i)(?:^|[. _-])S\d{1,2}E\d{1,3}(?:E\d{1,3})*", s):
+        return "episode"
+    if re.search(r"(?i)(?:^|[. _-])S(?:eason[. _-]?)?\d{1,2}(?!E\d)", s) or re.search(r"(?i)complete[. _-]?(?:season|s\d)", s):
+        return "season_pack"
+    return "episode"
 
 
 def build_grab_indexes(history, id_key):
-    by_id, by_title = {}, defaultdict(list)
+    by_download_id, by_title = {}, {}
     for rec in history:
         if str(rec.get("eventType", "")).lower() != "grabbed" or not is_usenet(rec):
             continue
-        did = str(get_download_id(rec) or "")
+        did = get_download_id(rec)
         if did:
-            by_id[did] = rec
-        title = source_title(rec).lower()
-        if title:
-            by_title[(rec.get(id_key), title)].append(rec)
-    return by_id, by_title
+            by_download_id[str(did)] = rec
+        src, entity_id = source_title(rec), rec.get(id_key)
+        if src and entity_id is not None:
+            by_title.setdefault((entity_id, src.strip().lower()), rec)
+    return by_download_id, by_title
 
 
-def match_grab(rec, by_id, by_title, id_key):
-    did = str(get_download_id(rec) or "")
-    if did and did in by_id:
-        return by_id[did]
-    title = source_title(rec).lower()
-    candidates = by_title.get((rec.get(id_key), title), [])
-    if candidates:
-        return candidates[0]
-    return None
+def match_grab(rec, by_download_id, by_title, id_key):
+    did = get_download_id(rec)
+    if did and str(did) in by_download_id:
+        return by_download_id[str(did)]
+    src, entity_id = source_title(rec), rec.get(id_key)
+    return by_title.get((entity_id, src.strip().lower())) if src and entity_id is not None else None
 
 
 def grab_rows(history, entities, id_key, media_kind):
@@ -270,23 +270,11 @@ def sonarr_data(since):
     grabbed_by_id, grabbed_by_title = build_grab_indexes(history, "seriesId")
     imports = [r for r in history if str(r.get("eventType", "")).lower() == "downloadfolderimported" and is_usenet(r)]
     episode_by_id = {}
-    season_episode_counts = defaultdict(int)
     for series_id in sorted({r.get("seriesId") for r in imports if r.get("seriesId")}):
         try:
-            episodes = api_get(SONARR_URL, SONARR_API_KEY, "episode", {"seriesId": series_id})
-            for ep in episodes:
+            for ep in api_get(SONARR_URL, SONARR_API_KEY, "episode", {"seriesId": series_id}):
                 if ep.get("id") is not None:
                     episode_by_id[ep["id"]] = ep
-                try:
-                    season_number = int(ep.get("seasonNumber"))
-                    episode_number = int(ep.get("episodeNumber"))
-                except (TypeError, ValueError):
-                    continue
-                # Specials (season 0) and non-numbered rows are intentionally ignored.
-                # The count is Sonarr's current canonical episode list, so incomplete
-                # or still-airing seasons do not collapse prematurely.
-                if season_number > 0 and episode_number > 0:
-                    season_episode_counts[(series_id, season_number)] += 1
         except Exception:
             pass
     items, seen = [], set()
@@ -302,10 +290,6 @@ def sonarr_data(since):
         folder = ser.get("path") or (os.path.dirname(imported) if imported else "")
         season, number = ep.get("seasonNumber"), ep.get("episodeNumber")
         episode_code = f"S{int(season):02d}E{int(number):02d}" if season is not None and number is not None else ""
-        try:
-            expected_count = season_episode_counts.get((rec.get("seriesId"), int(season)), 0) if season is not None else 0
-        except (TypeError, ValueError):
-            expected_count = 0
         import_dt, grab_dt = parse_dt(rec.get("date")), parse_dt((grab or {}).get("date"))
         display_dt = grab_dt or import_dt
         size = int(data.get("size") or data.get("fileSize") or 0)
@@ -317,7 +301,6 @@ def sonarr_data(since):
             "date": display_dt.isoformat() if display_dt else rec.get("date"), "grabDate": (grab or {}).get("date") or "", "importDate": rec.get("date") or "",
             "timestamp": display_dt.timestamp() if display_dt else 0, "importTimestamp": import_dt.timestamp() if import_dt else 0,
             "title": ser.get("title") or "Unbekannte Serie", "year": ser.get("year") or "", "seasonNumber": season, "episodeNumber": number,
-            "seasonEpisodeCount": expected_count,
             "episodeCode": episode_code, "episodeTitle": ep.get("title") or "", "originalRelease": src,
             "targetFolder": host_path(folder), "targetFile": host_path(imported), "quality": quality_label(rec), "releaseGroup": data.get("releaseGroup") or release_group_from_name(src),
             "indexer": get_indexer(grab or {}) or get_indexer(rec) or "Unbekannt", "downloadClient": download_client(grab or {}) or download_client(rec),
