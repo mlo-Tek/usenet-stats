@@ -1,0 +1,101 @@
+/* Download-source UI layer.
+ * Distinguishes the downloader/initiator from the later Arr importer.
+ * rePollo is authoritative when SABnzbd category metadata says repollo.
+ */
+(() => {
+  function canonicalSource(value, item = null) {
+    const normalized = String(value || "").trim().toLowerCase();
+    if (normalized === "repollo" || normalized === "reppollo") return "rePollo";
+    if (normalized === "radarr") return "Radarr";
+    if (normalized === "sonarr") return "Sonarr";
+    if (normalized === "sabnzbd" || normalized === "sab") return "SABnzbd";
+    if (item?.kind === "movie") return "Radarr";
+    if (item?.kind === "episode") return "Sonarr";
+    return "SABnzbd";
+  }
+
+  function effectiveDownloadSource(item) {
+    return canonicalSource(item?.source, item);
+  }
+
+  function sourceClassName(value) {
+    const source = canonicalSource(value);
+    if (source === "rePollo") return "source-reppollo";
+    if (source === "Radarr") return "source-radarr";
+    if (source === "Sonarr") return "source-sonarr";
+    return "source-sab";
+  }
+
+  window.effectiveDownloadSource = effectiveDownloadSource;
+
+  /* sab-extension.js uses this function dynamically when rendering SAB cards. */
+  sourceClass = sourceClassName;
+
+  const basePopulateFilters = populateFilters;
+  populateFilters = function() {
+    basePopulateFilters();
+    const all = [
+      ...(DATA?.movies || []),
+      ...(DATA?.episodes || []),
+      ...(DATA?.sabDownloads || []),
+    ];
+    const sources = all.map(effectiveDownloadSource);
+    /* Keep all four expected choices available even when one source has no
+     * rows in the current cache yet. */
+    populateSelect(
+      "source",
+      ["Radarr", "Sonarr", "rePollo", "SABnzbd", ...sources],
+      "Alle Quellen"
+    );
+  };
+
+  const baseFilteredOriginal = baseFiltered;
+  baseFiltered = function(items) {
+    const filtered = baseFilteredOriginal(items);
+    const wanted = canonicalSource(el("source")?.value || "");
+    if (!el("source")?.value) return filtered;
+    return filtered.filter(item => effectiveDownloadSource(item) === wanted);
+  };
+
+  const baseCardHtml = cardHtml;
+  cardHtml = function(item) {
+    let html = baseCardHtml(item);
+    if (item?.kind === "failed") return html;
+
+    const source = effectiveDownloadSource(item);
+    const badge = `<span class="badge source-badge ${sourceClassName(source)}">${esc(source)}</span>`;
+    return html.replace(/(<div class="meta">[\s\S]*?<\/div>)/, `$1${badge}`);
+  };
+
+  const baseShowDetails = showDetails;
+  showDetails = function(raw) {
+    const item = JSON.parse(raw);
+    if (item.kind === "usenet") {
+      baseShowDetails(raw);
+      return;
+    }
+
+    const source = effectiveDownloadSource(item);
+    const fields = [
+      ["Titel", item.title],
+      ["Download-Quelle", source],
+      ["Release", item.originalRelease],
+      ["Indexer", item.indexer],
+      ["Download Client", item.downloadClient],
+      ["Qualität", item.quality],
+      ["Release Group", item.releaseGroup],
+      ["Grab", fmtDate(item.grabDate || item.date)],
+      ["Import", fmtDate(item.importDate)],
+      ["Zielordner", item.targetFolder],
+      ["Zieldatei", item.targetFile],
+      ["Größe", item.sizeText || bytes(item.size)],
+    ];
+
+    el("detailsBody").innerHTML = `<h2>${esc(item.title)}</h2><dl>${fields
+      .filter(v => v[1])
+      .map(([k, v]) => `<dt>${esc(k)}</dt><dd class="mono">${esc(v)}</dd>`)
+      .join("")}</dl>${item.arrUrl ? `<a class="arr-button" target="_blank" href="${esc(item.arrUrl)}">In ${item.kind === "movie" ? "Radarr" : "Sonarr"} öffnen ↗</a>` : ""}`;
+    el("details").showModal();
+  };
+  window.showDetails = showDetails;
+})();

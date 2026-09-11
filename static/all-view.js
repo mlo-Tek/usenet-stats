@@ -5,19 +5,34 @@
 
   function mediaType(item) {
     if (item.kind === "movie") {
-      return {label:"🎬 Film", cls:"type-movie", card:"media-movie", source:"Radarr"};
+      return {label:"🎬 Film", cls:"type-movie", card:"media-movie", importer:"Radarr"};
     }
     if (item.releaseType === "season_pack") {
-      return {label:"📺 Serie", subtype:"📦 Season Pack", cls:"type-series", subtypeCls:"type-pack", card:"media-series", source:"Sonarr"};
+      return {label:"📺 Serie", subtype:"📦 Season Pack", cls:"type-series", subtypeCls:"type-pack", card:"media-series", importer:"Sonarr"};
     }
-    return {label:"📺 Serie", subtype:"Folge", cls:"type-series", subtypeCls:"type-episode", card:"media-series", source:"Sonarr"};
+    return {label:"📺 Serie", subtype:"Folge", cls:"type-series", subtypeCls:"type-episode", card:"media-series", importer:"Sonarr"};
+  }
+
+  function downloadSource(item) {
+    if (typeof window.effectiveDownloadSource === "function") {
+      return window.effectiveDownloadSource(item);
+    }
+    return item.source || (item.kind === "movie" ? "Radarr" : "Sonarr");
+  }
+
+  function sourceClassName(source) {
+    const normalized = String(source || "").toLowerCase();
+    if (normalized === "repollo" || normalized === "reppollo") return "source-reppollo";
+    if (normalized === "radarr") return "source-radarr";
+    if (normalized === "sonarr") return "source-sonarr";
+    return "source-sab";
   }
 
   function allItems() {
     const p = periodData();
     return [
-      ...(p.movies || []).map(x => ({...x, source:x.source || "Radarr"})),
-      ...(p.episodes || []).map(x => ({...x, source:x.source || "Sonarr"})),
+      ...(p.movies || []).map(x => ({...x, source:downloadSource(x)})),
+      ...(p.episodes || []).map(x => ({...x, source:downloadSource(x)})),
     ];
   }
 
@@ -33,15 +48,15 @@
     const typ = el("seriesType").value;
 
     return items.filter(x => {
-      const derivedSource = x.kind === "movie" ? "Radarr" : "Sonarr";
+      const actualSource = downloadSource(x);
       const hay = [
         x.title,x.year,x.episodeCode,x.episodeTitle,x.originalRelease,
         x.targetFolder,x.targetFile,x.releaseGroup,x.indexer,
-        x.downloadClient,x.library,derivedSource
+        x.downloadClient,x.library,actualSource
       ].join(" ").toLowerCase();
 
       if (q && !hay.includes(q)) return false;
-      if (src && derivedSource !== src && x.source !== src) return false;
+      if (src && actualSource !== src) return false;
       if (ix && x.indexer !== ix) return false;
       if (qual && x.quality !== qual) return false;
       if (grp && x.releaseGroup !== grp) return false;
@@ -60,6 +75,7 @@
 
   function allCardHtml(x) {
     const type = mediaType(x);
+    const source = downloadSource(x);
     const img = x.poster
       ? `<img class="poster" src="${esc(x.poster)}" loading="lazy">`
       : `<div class="poster"></div>`;
@@ -81,11 +97,12 @@
         <div class="meta">${subtitle}</div>
         <span class="badge media-type ${type.cls}">${type.label}</span>
         ${subtype}
+        <span class="badge source-badge ${sourceClassName(source)}">${esc(source)}</span>
         ${x.quality ? `<span class="badge">${esc(x.quality)}</span>` : ""}
         ${x.releaseGroup ? `<span class="badge">${esc(x.releaseGroup)}</span>` : ""}
         ${x.indexer ? `<span class="badge indexer">${esc(x.indexer)}</span>` : ""}
         ${x.isUpgrade ? `<span class="badge upgrade">Upgrade</span>` : ""}
-        <div class="media-origin">${type.source}</div>
+        <div class="media-origin">Importeur: ${type.importer}</div>
       </div>
       <div>
         <div class="label">Original Release</div>

@@ -17,6 +17,7 @@ REPOLLO_CATEGORIES = {
 }
 
 UNKNOWN_INDEXERS = {"", "unbekannt", "unknown", "none", "null"}
+SOURCE_PRIORITY = {"SABnzbd": 0, "Radarr": 1, "Sonarr": 1, "rePollo": 2}
 
 INDEXER_HOST_ALIASES = {
     "nzbgeek.info": "NZBGeek",
@@ -136,6 +137,35 @@ def detect_repollo(slot):
     return "repollo" in marker or "reppollo" in marker
 
 
+def _canonical_source(value):
+    source = str(value or "").strip()
+    normalized = source.lower()
+    if normalized in {"repollo", "reppollo"}:
+        return "rePollo"
+    if normalized == "radarr":
+        return "Radarr"
+    if normalized == "sonarr":
+        return "Sonarr"
+    return "SABnzbd"
+
+
+def _row_source(row):
+    category = str(row.get("category") or "").strip().lower()
+    if category in REPOLLO_CATEGORIES:
+        return "rePollo"
+    return _canonical_source(row.get("source"))
+
+
+def _prefer_source(old, new):
+    old = _canonical_source(old) if old else ""
+    new = _canonical_source(new) if new else ""
+    if not old:
+        return new
+    if SOURCE_PRIORITY.get(new, 0) > SOURCE_PRIORITY.get(old, 0):
+        return new
+    return old
+
+
 # Patch the functions used inside server.build_sab_downloads.
 server.indexer_from_slot = enhanced_indexer_from_slot
 server.detect_reppollo = detect_repollo
@@ -167,14 +197,58 @@ def build_release_indexer_map(payload):
     }
 
 
+def enrich_arr_download_sources(payload, sab_rows):
+    """Attach the actual download initiator/source to normal Arr media rows.
+
+    SAB category `repollo` is authoritative and wins over a later Radarr/Sonarr
+    import. Exact download IDs are preferred; an unambiguous exact release-name
+    match is used only as a fallback for older history rows without an ID.
+    """
+    by_download_id = {}
+    release_candidates = {}
+
+    for row in sab_rows:
+        source = _row_source(row)
+        row["source"] = source
+
+        download_id = str(row.get("downloadId") or row.get("nzoId") or "").strip()
+        if download_id:
+            by_download_id[download_id] = _prefer_source(
+                by_download_id.get(download_id), source
+            )
+
+        release = _normalize_release(row.get("originalRelease"))
+        if release:
+            release_candidates.setdefault(release, set()).add(source)
+
+    release_sources = {
+        release: next(iter(sources))
+        for release, sources in release_candidates.items()
+        if len(sources) == 1
+    }
+
+    for item in [*(payload.get("movies") or []), *(payload.get("episodes") or [])]:
+        default_source = "Radarr" if item.get("kind") == "movie" else "Sonarr"
+        download_id = str(item.get("downloadId") or "").strip()
+        source = by_download_id.get(download_id) if download_id else None
+
+        if not source:
+            release = _normalize_release(
+                item.get("originalRelease") or item.get("sourceTitle") or ""
+            )
+            source = release_sources.get(release)
+
+        item["source"] = source or default_source
+
+
 def enriched_build_sab_downloads(payload):
     rows = _original_build_sab_downloads(payload)
     release_indexers = build_release_indexer_map(payload)
 
     for row in rows:
-        # Fix old spelling emitted by older cache/app versions.
-        if str(row.get("source") or "").lower() in {"reppollo", "repollo"}:
-            row["source"] = "rePollo"
+        # SAB's repollo category is authoritative even if Radarr/Sonarr later
+        # imported the download. This fixes importer != download-source cases.
+        row["source"] = _row_source(row)
 
         if _is_unknown(row.get("indexer")):
             release = _normalize_release(row.get("originalRelease"))
@@ -187,6 +261,7 @@ def enriched_build_sab_downloads(payload):
         else:
             row.setdefault("indexerSource", "SABnzbd-Quellmetadaten")
 
+    enrich_arr_download_sources(payload, rows)
     return rows
 
 
