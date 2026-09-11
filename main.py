@@ -6,8 +6,9 @@ import refresh_resilience
 server = refresh_resilience.server
 app = server.app
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
+_original_sonarr_data = server.core.sonarr_data
 _original_build_payload = server.core.build_payload
 _original_stats_view = app.view_functions["stats"]
 
@@ -44,24 +45,11 @@ def _merge_ledger(previous, fresh):
     )
 
 
-def _enrich_season_episode_counts(payload):
-    """Attach Sonarr's actual regular-episode count to every episode row.
-
-    Count Sonarr's episode objects directly instead of relying on optional season
-    statistics. Specials (season 0) and non-positive episode numbers are ignored.
-    This makes complete-season folding deterministic for individually downloaded
-    episodes while preventing partial seasons from collapsing.
-    """
-    rows = payload.get("episodes") or []
-    if not rows or not server.core.SONARR_API_KEY:
-        return
-
-    wanted_series = {row.get("seriesId") for row in rows if row.get("seriesId") is not None}
-    if not wanted_series:
-        return
-
+def _season_episode_counts(series_ids):
+    """Return Sonarr's canonical regular-episode count per series/season."""
     counts = defaultdict(int)
-    for series_id in wanted_series:
+
+    for series_id in series_ids:
         try:
             episodes = server.core.api_get(
                 server.core.SONARR_URL,
@@ -79,22 +67,50 @@ def _enrich_season_episode_counts(payload):
                 episode_number = int(episode.get("episodeNumber"))
             except (TypeError, ValueError):
                 continue
+
             if season_number <= 0 or episode_number <= 0:
                 continue
-            key = (series_id, season_number, episode_number)
-            if key in seen:
+
+            identity = (series_id, season_number, episode_number)
+            if identity in seen:
                 continue
-            seen.add(key)
+            seen.add(identity)
             counts[(series_id, season_number)] += 1
 
-    for row in rows:
+    return counts
+
+
+def sonarr_data_with_season_counts(since):
+    """Keep seasonEpisodeCount on both full and incremental Sonarr refreshes.
+
+    incremental_refresh.py calls core.sonarr_data() directly. Enriching here is
+    therefore essential: doing it only after build_payload() means the next fast
+    refresh replaces the rows and silently drops seasonEpisodeCount again.
+    """
+    items, failed, grabs = _original_sonarr_data(since)
+    if not items or not server.core.SONARR_API_KEY:
+        return items, failed, grabs
+
+    series_ids = {
+        item.get("seriesId")
+        for item in items
+        if item.get("seriesId") is not None
+    }
+    counts = _season_episode_counts(series_ids)
+
+    for item in items:
         try:
-            key = (row.get("seriesId"), int(row.get("seasonNumber")))
+            key = (item.get("seriesId"), int(item.get("seasonNumber")))
         except (TypeError, ValueError):
             continue
         expected = counts.get(key, 0)
         if expected > 0:
-            row["seasonEpisodeCount"] = expected
+            item["seasonEpisodeCount"] = expected
+
+    return items, failed, grabs
+
+
+server.core.sonarr_data = sonarr_data_with_season_counts
 
 
 def build_payload_with_ledger(force=False):
@@ -106,7 +122,6 @@ def build_payload_with_ledger(force=False):
         previous_sab,
         payload.get("sabDownloads") or [],
     )
-    _enrich_season_episode_counts(payload)
     payload["_schemaVersion"] = SCHEMA_VERSION
 
     server.core._cache["payload"] = payload
@@ -117,11 +132,11 @@ def build_payload_with_ledger(force=False):
 server.core.build_payload = build_payload_with_ledger
 
 
-def stats_view_v9():
+def stats_view_v10():
     payload = server.core._cache.get("payload") or {}
     if int(payload.get("_schemaVersion", 0) or 0) < SCHEMA_VERSION:
-        server.trigger_refresh(force_full=False)
+        server.trigger_refresh(force_full=True)
     return _original_stats_view()
 
 
-app.view_functions["stats"] = stats_view_v9
+app.view_functions["stats"] = stats_view_v10
