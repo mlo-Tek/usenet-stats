@@ -12,6 +12,7 @@
   let storedNodes = [];
   let applying = false;
   let scheduled = false;
+  let ignoreOwnMutation = false;
   let controls = null;
   let summary = null;
   let select = null;
@@ -84,6 +85,7 @@
     }
 
     applying = true;
+    ignoreOwnMutation = true;
     restoreNodes();
 
     const list = el("list");
@@ -103,6 +105,7 @@
     syncSelect();
 
     applying = false;
+    queueMicrotask(() => { ignoreOwnMutation = false; });
   }
 
   function scheduleLimit() {
@@ -159,7 +162,10 @@
     patchRender("renderAll");
     bindResetEvents();
 
-    const observer = new MutationObserver(() => scheduleLimit());
+    const observer = new MutationObserver(() => {
+      if (ignoreOwnMutation) return;
+      scheduleLimit();
+    });
     observer.observe(el("list"), {childList: true});
 
     resetListLimit();
