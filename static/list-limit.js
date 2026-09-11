@@ -11,10 +11,14 @@
   let scheduled = false;
   let captureScheduled = false;
   let ignoreOwnMutation = false;
-  let controls = null;
-  let summary = null;
-  let previous = null;
-  let next = null;
+  let topControls = null;
+  let bottomControls = null;
+  let topSummary = null;
+  let bottomSummary = null;
+  let topPrevious = null;
+  let topNext = null;
+  let bottomPrevious = null;
+  let bottomNext = null;
 
   function scrollToListStart() {
     requestAnimationFrame(() => {
@@ -22,52 +26,92 @@
     });
   }
 
-  function ensureControls() {
-    if (controls) return;
-
-    controls = document.createElement("section");
-    controls.id = "listLimitControls";
-    controls.className = "list-limit";
-    controls.hidden = true;
-    controls.innerHTML = `
-      <div class="list-limit-summary" id="listLimitSummary"></div>
+  function controlsHtml(prefix) {
+    return `
+      <div class="list-limit-summary" id="${prefix}Summary"></div>
       <div class="list-limit-actions">
-        <button id="listPagePrevious" type="button">← Vorherige 50</button>
-        <button id="listPageNext" type="button">Nächste 50 →</button>
+        <button id="${prefix}Previous" type="button">← Vorherige 50</button>
+        <button id="${prefix}Next" type="button">Nächste 50 →</button>
       </div>
     `;
+  }
+
+  function goPrevious() {
+    if (currentPage <= 0) return;
+    currentPage -= 1;
+    applyPage(false);
+    scrollToListStart();
+  }
+
+  function goNext() {
+    const pageCount = Math.max(1, Math.ceil(allNodes.length / PAGE_SIZE));
+    if (currentPage >= pageCount - 1) return;
+    currentPage += 1;
+    applyPage(false);
+    scrollToListStart();
+  }
+
+  function ensureControls() {
+    if (topControls && bottomControls) return;
 
     const list = el("list");
-    list.parentNode.insertBefore(controls, list.nextSibling);
-    summary = el("listLimitSummary");
-    previous = el("listPagePrevious");
-    next = el("listPageNext");
 
-    previous.addEventListener("click", () => {
-      if (currentPage <= 0) return;
-      currentPage -= 1;
-      applyPage(false);
-      scrollToListStart();
-    });
+    topControls = document.createElement("section");
+    topControls.id = "listLimitControlsTop";
+    topControls.className = "list-limit";
+    topControls.hidden = true;
+    topControls.innerHTML = controlsHtml("listPageTop");
+    list.parentNode.insertBefore(topControls, list);
 
-    next.addEventListener("click", () => {
-      const pageCount = Math.max(1, Math.ceil(allNodes.length / PAGE_SIZE));
-      if (currentPage >= pageCount - 1) return;
-      currentPage += 1;
-      applyPage(false);
-      scrollToListStart();
-    });
+    bottomControls = document.createElement("section");
+    bottomControls.id = "listLimitControls";
+    bottomControls.className = "list-limit";
+    bottomControls.hidden = true;
+    bottomControls.innerHTML = controlsHtml("listPageBottom");
+    list.parentNode.insertBefore(bottomControls, list.nextSibling);
+
+    topSummary = el("listPageTopSummary");
+    bottomSummary = el("listPageBottomSummary");
+    topPrevious = el("listPageTopPrevious");
+    topNext = el("listPageTopNext");
+    bottomPrevious = el("listPageBottomPrevious");
+    bottomNext = el("listPageBottomNext");
+
+    topPrevious.addEventListener("click", goPrevious);
+    bottomPrevious.addEventListener("click", goPrevious);
+    topNext.addEventListener("click", goNext);
+    bottomNext.addEventListener("click", goNext);
   }
 
   function visibleItemNodes() {
     return [...el("list").children].filter(node => node.classList?.contains("item"));
   }
 
+  function syncControls(total, pageCount, start, end) {
+    const hidden = total === 0;
+    topControls.hidden = hidden;
+    bottomControls.hidden = hidden;
+
+    const text = total > 0
+      ? `${start + 1}–${end} von ${total} Einträgen · Seite ${currentPage + 1} von ${pageCount}`
+      : "";
+    topSummary.textContent = text;
+    bottomSummary.textContent = text;
+
+    const hidePrevious = currentPage === 0;
+    const hideNext = currentPage >= pageCount - 1;
+    topPrevious.hidden = hidePrevious;
+    bottomPrevious.hidden = hidePrevious;
+    topNext.hidden = hideNext;
+    bottomNext.hidden = hideNext;
+  }
+
   function applyPage(capture = true) {
     ensureControls();
 
     if (TAB === "indexers" || el("list").hidden) {
-      controls.hidden = true;
+      topControls.hidden = true;
+      bottomControls.hidden = true;
       return;
     }
 
@@ -89,15 +133,7 @@
     for (const node of allNodes.slice(start, end)) fragment.appendChild(node);
     list.appendChild(fragment);
 
-    controls.hidden = total === 0;
-    if (total > 0) {
-      summary.textContent = `${start + 1}–${end} von ${total} Einträgen · Seite ${currentPage + 1} von ${pageCount}`;
-    } else {
-      summary.textContent = "";
-    }
-
-    previous.hidden = currentPage === 0;
-    next.hidden = currentPage >= pageCount - 1;
+    syncControls(total, pageCount, start, end);
 
     applying = false;
     queueMicrotask(() => { ignoreOwnMutation = false; });
