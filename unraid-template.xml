@@ -25,6 +25,10 @@
   <Config Name="rePollo Kategorien" Target="REPOLLO_CATEGORIES" Default="repollo,reseed" Mode="" Description="Kommagetrennte SABnzbd-Kategorien, die als Quelle rePollo markiert werden. Das alte REPPOLLO_CATEGORIES wird weiterhin unterstützt." Type="Variable" Display="always" Required="false" Mask="false">repollo,reseed</Config>
   <Config Name="SAB Path Mapping" Target="SAB_PATH_MAPPINGS" Default="/data/usenet=/mnt/user/data/usenet" Mode="" Description="Übersetzt den SABnzbd-Containerpfad in den Unraid-Hostpfad. Mehrere Mappings mit Semikolon trennen." Type="Variable" Display="always" Required="false" Mask="false">/data/usenet=/mnt/user/data/usenet</Config>
 
+  <Config Name="Kryo Manager URL" Target="KRYO_MANAGER_URL" Default="http://kryo-manager:8080" Mode="" Description="Interne URL zum Kryo Manager. Damit werden rePollo-Downloads, die von Kryo ausgelöst wurden, separat erkannt." Type="Variable" Display="always" Required="false" Mask="false">http://kryo-manager:8080</Config>
+  <Config Name="RocketHD URL" Target="RHD_BASE_URL" Default="https://rocket-hd.cc" Mode="" Description="RocketHD Basis-URL für die read-only Release-Prüfung." Type="Variable" Display="always" Required="false" Mask="false">https://rocket-hd.cc</Config>
+  <Config Name="RocketHD API Key" Target="RHD_API_KEY" Default="" Mode="" Description="RocketHD API-Key. Optional, aber erforderlich für die Anzeige 'auf RHD / nicht auf RHD'." Type="Variable" Display="always" Required="false" Mask="true"></Config>
+
   <Config Name="Radarr URL" Target="RADARR_URL" Default="http://10.20.20.9:7878" Mode="" Description="Interne URL zu Radarr." Type="Variable" Display="always" Required="true" Mask="false">http://10.20.20.9:7878</Config>
   <Config Name="Radarr API Key" Target="RADARR_API_KEY" Default="" Mode="" Description="Radarr API Key." Type="Variable" Display="always" Required="true" Mask="true"></Config>
   <Config Name="Sonarr URL" Target="SONARR_URL" Default="http://10.20.20.10:8989" Mode="" Description="Interne URL zu Sonarr." Type="Variable" Display="always" Required="true" Mask="false">http://10.20.20.10:8989</Config>
@@ -38,6 +42,7 @@
   <Config Name="Legacy Auto Refresh" Target="AUTO_REFRESH_SECONDS" Default="900" Mode="" Description="Legacy-Wert. Der laufende Schnellscan wird durch FAST_REFRESH_SECONDS gesteuert." Type="Variable" Display="advanced" Required="false" Mask="false">900</Config>
   <Config Name="Cache" Target="CACHE_SECONDS" Default="900" Mode="" Description="Interner Cache in Sekunden." Type="Variable" Display="advanced" Required="false" Mask="false">900</Config>
   <Config Name="Metadaten Cache" Target="METADATA_CACHE_SECONDS" Default="21600" Mode="" Description="Cachezeit für Sonarr-Episodenmetadaten in Sekunden." Type="Variable" Display="advanced" Required="false" Mask="false">21600</Config>
+  <Config Name="Externe Integrationen Cache" Target="EXTERNAL_CACHE_SECONDS" Default="900" Mode="" Description="Cachezeit für Kryo-/RocketHD-Abfragen in Sekunden." Type="Variable" Display="advanced" Required="false" Mask="false">900</Config>
   <Config Name="Maximaler Zeitraum" Target="MAX_DAYS" Default="90" Mode="" Description="Maximal von SABnzbd/Radarr/Sonarr geladener Zeitraum. 7/30/90 Tage werden danach lokal gefiltert." Type="Variable" Display="advanced" Required="false" Mask="false">90</Config>
   <Config Name="Timezone" Target="TZ" Default="Europe/Berlin" Mode="" Description="Zeitzone." Type="Variable" Display="advanced" Required="false" Mask="false">Europe/Berlin</Config>
 </Container>
