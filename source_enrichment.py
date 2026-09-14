@@ -85,7 +85,6 @@ def _walk_strings(value):
 
 
 def enhanced_indexer_from_slot(slot):
-    # Explicit fields first.
     for key in (
         "indexer", "indexer_name", "indexerName",
         "provider", "provider_name", "providerName",
@@ -95,7 +94,6 @@ def enhanced_indexer_from_slot(slot):
         if value and not _is_unknown(value):
             return str(value).strip()
 
-    # Some submitters preserve source metadata inside `meta`.
     meta = slot.get("meta")
     if isinstance(meta, dict):
         for key, value in meta.items():
@@ -104,9 +102,6 @@ def enhanced_indexer_from_slot(slot):
                 if value and not _is_unknown(value):
                     return str(value).strip()
 
-    # SAB history exposes URL/url_info and stage_log. When rePollo submits an
-    # NZB by URL, this recovers the actual indexer hostname rather than showing
-    # an invented value.
     candidates = [
         slot.get("url_info"),
         slot.get("nzb_url"),
@@ -166,7 +161,6 @@ def _prefer_source(old, new):
     return old
 
 
-# Patch the functions used inside server.build_sab_downloads.
 server.indexer_from_slot = enhanced_indexer_from_slot
 server.detect_reppollo = detect_repollo
 
@@ -198,47 +192,42 @@ def build_release_indexer_map(payload):
 
 
 def enrich_arr_download_sources(payload, sab_rows):
-    """Attach the actual download initiator/source to normal Arr media rows.
+    """Attach the actual trigger/source to normal Arr media rows.
 
-    SAB category `repollo` is authoritative and wins over a later Radarr/Sonarr
-    import. Exact download IDs are preferred; an unambiguous exact release-name
-    match is used only as a fallback for older history rows without an ID.
+    A normal SAB download does not replace the Arr trigger: Radarr/Sonarr asked
+    SAB to download it, so the source remains the corresponding Arr. Only an
+    authoritative rePollo SAB category may override the Arr source. Kryo Manager
+    is resolved later from rePollo rows against Kryo's own history.
     """
-    by_download_id = {}
-    release_candidates = {}
+    repollo_by_download_id = set()
+    repollo_releases = set()
 
     for row in sab_rows:
         source = _row_source(row)
         row["source"] = source
+        if source != "rePollo":
+            continue
 
         download_id = str(row.get("downloadId") or row.get("nzoId") or "").strip()
         if download_id:
-            by_download_id[download_id] = _prefer_source(
-                by_download_id.get(download_id), source
-            )
+            repollo_by_download_id.add(download_id)
 
         release = _normalize_release(row.get("originalRelease"))
         if release:
-            release_candidates.setdefault(release, set()).add(source)
-
-    release_sources = {
-        release: next(iter(sources))
-        for release, sources in release_candidates.items()
-        if len(sources) == 1
-    }
+            repollo_releases.add(release)
 
     for item in [*(payload.get("movies") or []), *(payload.get("episodes") or [])]:
         default_source = "Radarr" if item.get("kind") == "movie" else "Sonarr"
         download_id = str(item.get("downloadId") or "").strip()
-        source = by_download_id.get(download_id) if download_id else None
+        is_repollo = bool(download_id and download_id in repollo_by_download_id)
 
-        if not source:
+        if not is_repollo:
             release = _normalize_release(
                 item.get("originalRelease") or item.get("sourceTitle") or ""
             )
-            source = release_sources.get(release)
+            is_repollo = bool(release and release in repollo_releases)
 
-        item["source"] = source or default_source
+        item["source"] = "rePollo" if is_repollo else default_source
 
 
 def enriched_build_sab_downloads(payload):
@@ -246,8 +235,6 @@ def enriched_build_sab_downloads(payload):
     release_indexers = build_release_indexer_map(payload)
 
     for row in rows:
-        # SAB's repollo category is authoritative even if Radarr/Sonarr later
-        # imported the download. This fixes importer != download-source cases.
         row["source"] = _row_source(row)
 
         if _is_unknown(row.get("indexer")):
@@ -268,8 +255,6 @@ def enriched_build_sab_downloads(payload):
 server.build_sab_downloads = enriched_build_sab_downloads
 
 
-# The dashboard UI predates the SAB-first data model. Inject the small extension
-# after app.js so existing layout/theme/filter code stays untouched.
 @server.app.after_request
 def inject_sab_frontend(response):
     content_type = response.headers.get("Content-Type", "")
