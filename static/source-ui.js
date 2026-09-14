@@ -113,7 +113,6 @@
   let preset14Active = false;
   let applying14 = false;
   let patching = false;
-  let observer = null;
 
   function ymd(value) {
     const d = new Date(value);
@@ -169,8 +168,10 @@
     if (top + measuredHeight > window.innerHeight - margin) {
       top = Math.max(margin, rect.top - measuredHeight - 7);
     }
-    pop.style.left = `${Math.round(left)}px`;
-    pop.style.top = `${Math.round(top)}px`;
+    const nextLeft = `${Math.round(left)}px`;
+    const nextTop = `${Math.round(top)}px`;
+    if (pop.style.left !== nextLeft) pop.style.left = nextLeft;
+    if (pop.style.top !== nextTop) pop.style.top = nextTop;
   }
 
   function markActivePreset(pop) {
@@ -239,15 +240,15 @@
     try {
       injectStyle();
 
-      /* The v4 preview originally had this extra item, but the requested preset
-       * set is Heute, Gestern, 7, 14 and 30 Tage. */
+      /* Requested preset set: Heute, Gestern, 7, 14 and 30 Tage. */
       pop.querySelector('[data-range="last24"]')?.remove();
       addFourteenDayPreset(pop);
 
       const exactHint = pop.querySelector(".v4-exact-label");
-      if (exactHint) exactHint.textContent = "Kalendertag anklicken = exakter Tag (letzte 30 Tage)";
+      const exactText = "Kalendertag anklicken = exakter Tag (letzte 30 Tage)";
+      if (exactHint && exactHint.textContent !== exactText) exactHint.textContent = exactText;
 
-      if (preset14Active) label.textContent = "Letzte 14 Tage";
+      if (preset14Active && label.textContent !== "Letzte 14 Tage") label.textContent = "Letzte 14 Tage";
 
       const customRange = pop.querySelector(".v4-custom-range");
       if (customRange) {
@@ -286,7 +287,7 @@
     injectStyle();
     bindGlobalEvents();
 
-    observer = new MutationObserver(() => {
+    const observer = new MutationObserver(() => {
       if (!patching) queueMicrotask(patchCalendar);
     });
     observer.observe(document.body, {subtree:true, childList:true, attributes:true, attributeFilter:["hidden"]});
