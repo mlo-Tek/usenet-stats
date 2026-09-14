@@ -1,0 +1,18 @@
+/* Final alignment for the approved v4 table layout. */
+.v4-list-head,.v4-row-main{
+  grid-template-columns:minmax(300px,1.7fr) 96px 172px 80px 150px 190px;
+  gap:14px;
+}
+.v4-list-head>div:nth-child(6){text-align:right;padding-right:34px}
+.v4-row-main>div:nth-child(2){display:flex;align-items:center}
+.v4-quality-cell{min-width:0;overflow:hidden;flex-wrap:nowrap}
+.v4-quality-cell .v4-pill{max-width:92px;overflow:hidden;text-overflow:ellipsis}
+.v4-status-group{justify-content:flex-end;gap:7px;min-width:0}
+.v4-chevron{width:20px;flex:none}
+.v4-title{max-width:38ch}
+@media(max-width:1180px){
+  .v4-list-head,.v4-row-main{grid-template-columns:minmax(250px,1.45fr) 90px 145px 72px 132px 176px;gap:9px}
+}
+@media(max-width:850px){
+  .v4-row-main{grid-template-columns:minmax(0,1fr) auto;gap:10px}
+}
