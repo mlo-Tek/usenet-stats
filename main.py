@@ -1,5 +1,6 @@
 import os
 import re
+import threading
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -12,7 +13,7 @@ import refresh_resilience
 server = refresh_resilience.server
 app = server.app
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 RHD_BASE_URL = os.getenv("RHD_BASE_URL", "https://rocket-hd.cc").rstrip("/")
 RHD_API_KEY = os.getenv("RHD_API_KEY", "").strip()
@@ -26,6 +27,8 @@ _original_stats_view = app.view_functions["stats"]
 
 _kryo_cache = {"expires": 0.0, "releases": set()}
 _rhd_cache = {}
+_rhd_request_lock = threading.Lock()
+_rhd_last_request_at = 0.0
 
 
 def _normalize_release(value):
@@ -130,6 +133,23 @@ def sonarr_data_with_season_counts(since):
 server.core.sonarr_data = sonarr_data_with_season_counts
 
 
+def _add_kryo_job_releases(releases, jobs):
+    for job in jobs or []:
+        for value in (job.get("release_name"), job.get("uploaded_name")):
+            normalized = _normalize_release(value)
+            if normalized:
+                releases.add(normalized)
+
+
+def _kryo_history_detail(batch_id):
+    response = requests.get(
+        f"{KRYO_MANAGER_URL}/api/history/{batch_id}",
+        timeout=min(server.core.REQUEST_TIMEOUT, 8),
+    )
+    response.raise_for_status()
+    return response.json().get("jobs") or []
+
+
 def _kryo_release_names():
     if not KRYO_MANAGER_URL:
         return set()
@@ -139,20 +159,36 @@ def _kryo_release_names():
 
     releases = set()
     try:
+        # Current batch / active jobs.
         response = requests.get(
             f"{KRYO_MANAGER_URL}/api/dashboard",
             timeout=min(server.core.REQUEST_TIMEOUT, 8),
         )
         response.raise_for_status()
-        payload = response.json()
-        for job in payload.get("jobs") or []:
-            for value in (job.get("release_name"), job.get("uploaded_name")):
-                normalized = _normalize_release(value)
-                if normalized:
-                    releases.add(normalized)
+        _add_kryo_job_releases(releases, response.json().get("jobs") or [])
+
+        # Completed recent runs are not present in /api/dashboard. Read the
+        # persisted Kryo history too so recent rePollo downloads remain marked
+        # as Kryo after the batch has finished.
+        history_response = requests.get(
+            f"{KRYO_MANAGER_URL}/api/history",
+            params={"limit": 100},
+            timeout=min(server.core.REQUEST_TIMEOUT, 8),
+        )
+        history_response.raise_for_status()
+        runs = history_response.json().get("runs") or []
+        batch_ids = [int(run.get("id")) for run in runs if run.get("id")]
+        if batch_ids:
+            with ThreadPoolExecutor(max_workers=min(8, len(batch_ids))) as pool:
+                futures = [pool.submit(_kryo_history_detail, batch_id) for batch_id in batch_ids]
+                for future in as_completed(futures):
+                    try:
+                        _add_kryo_job_releases(releases, future.result())
+                    except Exception:
+                        continue
     except Exception:
-        # Kryo integration is optional. Do not break the statistics dashboard if
-        # the companion container is unavailable or not configured.
+        # Kryo integration is optional. Keep the last successful cache if the
+        # companion container is temporarily unavailable.
         releases = _kryo_cache.get("releases") or set()
 
     _kryo_cache["releases"] = releases
@@ -197,33 +233,64 @@ def _extract_media_id(path, label):
 
 
 def _rhd_query(params):
+    """Query RocketHD while respecting UNIT3D's API request rate limit."""
+    global _rhd_last_request_at
+
     if not RHD_API_KEY:
         return None
 
     key = tuple(sorted((str(k), str(v)) for k, v in params.items()))
-    cached = _rhd_cache.get(key)
     now = time.time()
+    cached = _rhd_cache.get(key)
     if cached and cached[0] > now:
         return cached[1]
 
-    query = {"api_token": RHD_API_KEY, "perPage": "100", **params}
-    response = requests.get(
-        f"{RHD_BASE_URL}/api/torrents/filter",
-        params=query,
-        headers={"Accept": "application/json", "User-Agent": "UsenetStats/1.0"},
-        timeout=min(server.core.REQUEST_TIMEOUT, 12),
-    )
-    response.raise_for_status()
-    payload = response.json()
-    names = set()
-    for row in payload.get("data") or []:
-        data = row.get("attributes", row) if isinstance(row, dict) else {}
-        normalized = _normalize_release(data.get("name"))
-        if normalized:
-            names.add(normalized)
+    # RocketHD/UNIT3D throttles API calls. Serializing requests avoids the 429s
+    # caused by the previous four-way parallel lookup.
+    with _rhd_request_lock:
+        cached = _rhd_cache.get(key)
+        now = time.time()
+        if cached and cached[0] > now:
+            return cached[1]
 
-    _rhd_cache[key] = (now + max(EXTERNAL_CACHE_SECONDS, 1800), names)
-    return names
+        query = {"api_token": RHD_API_KEY, "perPage": "100", **params}
+        response = None
+        for attempt in range(4):
+            remaining = 1.10 - (time.monotonic() - _rhd_last_request_at)
+            if remaining > 0:
+                time.sleep(remaining)
+
+            response = requests.get(
+                f"{RHD_BASE_URL}/api/torrents/filter",
+                params=query,
+                headers={"Accept": "application/json", "User-Agent": "UsenetStats/1.0"},
+                timeout=min(server.core.REQUEST_TIMEOUT, 12),
+            )
+            _rhd_last_request_at = time.monotonic()
+
+            if response.status_code != 429:
+                break
+
+            retry_after = response.headers.get("Retry-After", "")
+            try:
+                delay = max(1.1, min(float(retry_after), 30.0))
+            except (TypeError, ValueError):
+                delay = (2.0, 4.0, 8.0, 12.0)[attempt]
+            time.sleep(delay)
+
+        if response is None:
+            raise RuntimeError("RocketHD API returned no response")
+        response.raise_for_status()
+        payload = response.json()
+        names = set()
+        for row in payload.get("data") or []:
+            data = row.get("attributes", row) if isinstance(row, dict) else {}
+            normalized = _normalize_release(data.get("name"))
+            if normalized:
+                names.add(normalized)
+
+        _rhd_cache[key] = (time.time() + max(EXTERNAL_CACHE_SECONDS, 1800), names)
+        return names
 
 
 def _rhd_group_key(item):
@@ -273,19 +340,15 @@ def rhd_status():
 
     names_by_group = {}
     errors = []
-    if grouped:
-        with ThreadPoolExecutor(max_workers=min(4, len(grouped))) as pool:
-            futures = {
-                pool.submit(_rhd_query, group["params"]): query_key
-                for query_key, group in grouped.items()
-            }
-            for future in as_completed(futures):
-                query_key = futures[future]
-                try:
-                    names_by_group[query_key] = future.result()
-                except Exception as exc:
-                    names_by_group[query_key] = None
-                    errors.append(f"{type(exc).__name__}: {str(exc)[:160]}")
+    # Deliberately sequential. RocketHD's API rate limit rejects parallel
+    # filter requests; _rhd_query also enforces spacing across concurrent HTTP
+    # requests from multiple browser tabs.
+    for query_key, group in grouped.items():
+        try:
+            names_by_group[query_key] = _rhd_query(group["params"])
+        except Exception as exc:
+            names_by_group[query_key] = None
+            errors.append(f"{type(exc).__name__}: {str(exc)[:160]}")
 
     result = {}
     for query_key, group in grouped.items():
@@ -338,11 +401,11 @@ def build_payload_with_ledger(force=False):
 server.core.build_payload = build_payload_with_ledger
 
 
-def stats_view_v12():
+def stats_view_v13():
     payload = server.core._cache.get("payload") or {}
     if int(payload.get("_schemaVersion", 0) or 0) < SCHEMA_VERSION:
         server.trigger_refresh(force_full=True)
     return _original_stats_view()
 
 
-app.view_functions["stats"] = stats_view_v12
+app.view_functions["stats"] = stats_view_v13
