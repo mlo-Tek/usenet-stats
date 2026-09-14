@@ -2,6 +2,7 @@ import os
 import re
 import time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 from flask import jsonify, request
@@ -270,15 +271,25 @@ def rhd_status():
         query_key, params = _rhd_group_key(raw)
         grouped.setdefault(query_key, {"params": params, "items": []})["items"].append(raw)
 
-    result = {}
+    names_by_group = {}
     errors = []
-    for group in grouped.values():
-        try:
-            names = _rhd_query(group["params"])
-        except Exception as exc:
-            names = None
-            errors.append(f"{type(exc).__name__}: {str(exc)[:160]}")
+    if grouped:
+        with ThreadPoolExecutor(max_workers=min(4, len(grouped))) as pool:
+            futures = {
+                pool.submit(_rhd_query, group["params"]): query_key
+                for query_key, group in grouped.items()
+            }
+            for future in as_completed(futures):
+                query_key = futures[future]
+                try:
+                    names_by_group[query_key] = future.result()
+                except Exception as exc:
+                    names_by_group[query_key] = None
+                    errors.append(f"{type(exc).__name__}: {str(exc)[:160]}")
 
+    result = {}
+    for query_key, group in grouped.items():
+        names = names_by_group.get(query_key)
         for raw in group["items"]:
             key_value = str(raw.get("key") or "")
             releases = raw.get("releases")
