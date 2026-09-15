@@ -16,6 +16,27 @@
   }
 
   function effectiveDownloadSource(item) {
+    /*
+     * The v4 UI bundles Sonarr episodes into synthetic `kind: season` rows.
+     * Those rows do not necessarily carry an explicit `source`, even though
+     * every child episode can still be classified correctly.  Falling through
+     * to canonicalSource() used to classify such seasons as SABnzbd, which in
+     * turn prevented RocketHD lookups.  Resolve the aggregate from the child
+     * episodes first.
+     */
+    if (item?.kind === "season" && Array.isArray(item.children) && item.children.length) {
+      const sources = [...new Set(item.children.map(child => canonicalSource(child?.source, child)))];
+      if (sources.length === 1) return sources[0];
+
+      /* A season may contain episodes fetched at different times/sources. For
+       * the compact row, ARR takes precedence because those are precisely the
+       * releases that still need a RocketHD existence check. rePollo/Kryo
+       * releases are already known to exist on RHD. */
+      if (sources.some(source => source === "Radarr" || source === "Sonarr")) return "Sonarr";
+      if (sources.includes("Kryo Manager")) return "Kryo Manager";
+      if (sources.includes("rePollo")) return "rePollo";
+      return "SABnzbd";
+    }
     return canonicalSource(item?.source, item);
   }
 
