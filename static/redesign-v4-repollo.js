@@ -16,6 +16,10 @@
     .trim()
     .replace(/\s+/g, " ");
 
+  function hasData() {
+    return typeof DATA !== "undefined" && !!DATA;
+  }
+
   function reseedSource(row) {
     const source = String(row?.source || "").trim().toLowerCase();
     const category = String(row?.category || "").trim().toLowerCase();
@@ -77,7 +81,7 @@
   }
 
   function standaloneRows() {
-    if (!window.DATA) return {movies: [], episodes: [], seasonPacks: new Map()};
+    if (!hasData()) return {movies: [], episodes: [], seasonPacks: new Map()};
 
     const genuine = genuineRows();
     const knownIds = new Set(genuine.map(row => String(row.downloadId || "").trim()).filter(Boolean));
@@ -169,7 +173,7 @@
   }
 
   function sync() {
-    if (!window.DATA) return false;
+    if (!hasData()) return false;
     const realMovies = (DATA.movies || []).filter(row => !row?.[SYNTHETIC]);
     const realEpisodes = (DATA.episodes || []).filter(row => !row?.[SYNTHETIC]);
     DATA.movies = realMovies;
@@ -214,10 +218,16 @@
   }
 
   const observer = new MutationObserver(() => decorate());
+  function attachObserver() {
+    const list = document.getElementById("v4List");
+    if (!list || list.dataset.repolloObserved === "1") return;
+    list.dataset.repolloObserved = "1";
+    observer.observe(list, {childList: true, subtree: true});
+  }
+
   function start() {
     sync();
-    const list = document.getElementById("v4List");
-    if (list) observer.observe(list, {childList: true, subtree: true});
+    attachObserver();
     decorate();
   }
 
@@ -226,9 +236,13 @@
 
   let lastSignature = "";
   setInterval(() => {
-    if (!window.DATA) return;
+    if (!hasData()) return;
+    attachObserver();
     const signature = `${(DATA.sabDownloads || []).length}:${DATA.generatedAt || ""}`;
-    if (signature === lastSignature) return;
+    if (signature === lastSignature) {
+      decorate();
+      return;
+    }
     lastSignature = signature;
     if (sync() && typeof renderAll === "function") renderAll();
     decorate();
